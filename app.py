@@ -127,22 +127,19 @@ def is_qwen_image_model(path):
 
 
 def find_qwen_image_model():
-    folders = (
-        ROOT,
-        ROOT / "models",
-        ROOT / "diffusion_models",
-        ROOT / "models" / "diffusion_models",
-    )
     candidates = []
-    for folder in folders:
-        if not folder.is_dir():
-            continue
-        try:
-            for path in folder.iterdir():
-                if is_qwen_image_model(path):
-                    candidates.append(path.resolve())
-        except OSError:
-            continue
+    try:
+        # Search the project tree recursively so users can drop the model anywhere
+        # under image-gen without having to follow a special folder layout.
+        for path in ROOT.rglob("*"):
+            if not path.is_file():
+                continue
+            if any(part in (".venv", "outputs", "__pycache__") for part in path.parts):
+                continue
+            if is_qwen_image_model(path):
+                candidates.append(path.resolve())
+    except OSError:
+        pass
     if not candidates:
         return None
 
