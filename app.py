@@ -50,6 +50,12 @@ def local_path(value, field, required=False):
     }
     if path.suffix.lower() not in allowed[field]:
         raise ValueError(f"Unexpected {field} file type")
+    if field == "model" and not is_qwen_image_model(path):
+        lower = path.name.lower()
+        if any(word in lower for word in ("qwen3vl", "text_encoder", "text-encoder")):
+            raise ValueError("That file is the Qwen text encoder, not the image diffusion model.")
+        if "vae" in lower or "autoencoder" in lower:
+            raise ValueError("That file is the VAE, not the image diffusion model.")
     return path
 
 
@@ -101,12 +107,65 @@ def find_sd_cli(folder):
     return None
 
 
+
+def is_qwen_image_model(path):
+    if not path or not path.is_file() or path.suffix.lower() not in (".gguf", ".safetensors"):
+        return False
+    lower = path.name.lower()
+    if any(word in lower for word in ("qwen3vl", "qwen3-vl", "qwen3_vl", "text_encoder", "text-encoder", "vae", "autoencoder")):
+        return False
+    return ("qwen" in lower and "image" in lower) or lower.startswith("qwen-image-2.1")
+
+
+def find_qwen_image_model():
+    folders = (
+        ROOT,
+        ROOT / "models",
+        ROOT / "diffusion_models",
+        ROOT / "models" / "diffusion_models",
+    )
+    candidates = []
+    for folder in folders:
+        if not folder.is_dir():
+            continue
+        try:
+            for path in folder.iterdir():
+                if is_qwen_image_model(path):
+                    candidates.append(path.resolve())
+        except OSError:
+            continue
+    if not candidates:
+        return None
+
+    def score(path):
+        name = path.name.lower()
+        rank = 0
+        for token, value in (
+            ("q4_k_m", 80), ("q5_k_m", 70), ("q6_k", 60),
+            ("q8_0", 50), ("fp8", 40), ("bf16", 30),
+            ("uncensored", 20), ("uc", 15),
+        ):
+            if token in name:
+                rank += value
+        if path.suffix.lower() == ".gguf":
+            rank += 5
+        return (-rank, path.name.casefold())
+
+    return sorted(candidates, key=score)[0]
+
+
 REQUIRED = ("cli", "model", "encoder", "vae")
 
 
 def discover_companions(cfg):
     """Resolve the engine and companion model files with minimal user setup."""
     cfg = dict(cfg)
+
+    # Auto-detect the main Qwen image diffusion model from the project folder.
+    if not cfg.get("model") or not Path(cfg["model"]).is_file():
+        detected_model = find_qwen_image_model()
+        if detected_model:
+            cfg["model"] = str(detected_model)
 
     # Migrate old UI mistakes: an encoder/VAE selected in the former "diffusion model" field
     # should not be treated as the image model.
