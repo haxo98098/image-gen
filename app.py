@@ -2,6 +2,7 @@
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import threading
 from datetime import datetime
@@ -67,6 +68,56 @@ def pick_file(field):
         root.destroy()
 
 
+REQUIRED = ("cli", "model", "encoder", "vae")
+
+
+def discover_companions(cfg):
+    """Find recognizable companion files near the selected model, not across the entire disk."""
+    cfg = dict(cfg)
+    model = Path(cfg["model"]).expanduser() if cfg.get("model") else None
+    dirs = [ROOT, ROOT / "bin", ROOT / "models"]
+    if model and model.is_file():
+        base = model.parent
+        dirs = [base, base / "models", base / "text_encoders",
+                base / "vae", base / "bin", base.parent, base.parent / "models"] + dirs
+    for key in ("cli", "encoder", "vae"):
+        value = cfg.get(key, "")
+        if value and not Path(value).is_file():
+            cfg[key] = ""
+    if not cfg.get("cli"):
+        cmd = shutil.which("sd-cli") or shutil.which("sd-cli.exe")
+        if cmd:
+            cfg["cli"] = str(Path(cmd).resolve())
+    for folder in dict.fromkeys(dirs):
+        if not folder.is_dir():
+            continue
+        try:
+            candidates = sorted((p for p in folder.iterdir() if p.is_file()), key=lambda p: p.name.casefold())
+        except OSError:
+            continue
+        for path in candidates:
+            lower = path.name.lower()
+            if not cfg.get("cli") and lower in ("sd-cli.exe", "sd-cli"):
+                cfg["cli"] = str(path.resolve())
+            if path.suffix.lower() not in (".gguf", ".safetensors"):
+                continue
+            if model and path.resolve() == model.resolve():
+                continue
+            if not cfg.get("encoder") and any(word in lower for word in ("qwen3vl", "qwen3-vl", "qwen3_vl", "p-h3", "text_encoder", "text-encoder")):
+                cfg["encoder"] = str(path.resolve())
+            if not cfg.get("vae") and ("vae" in lower or "autoencoder" in lower):
+                cfg["vae"] = str(path.resolve())
+    return cfg
+
+
+def setup_payload():
+    cfg = config_read()
+    found = discover_companions(cfg)
+    if found != cfg:
+        config_write(found)
+    return {"config": found, "missing": [key for key in REQUIRED if not found.get(key) or not Path(found[key]).is_file()]}
+
+
 @app.get("/")
 def index():
     return app.send_static_file("index.html")
@@ -74,7 +125,7 @@ def index():
 
 @app.get("/api/config")
 def get_config():
-    return jsonify(config_read())
+    return jsonify(setup_payload())
 
 
 @app.post("/api/pick/<field>")
@@ -88,7 +139,7 @@ def pick(field):
             cfg = config_read()
             cfg[field] = selected
             config_write(cfg)
-        return jsonify(path=selected, config=config_read())
+        return jsonify(path=selected, **setup_payload())
     except Exception as exc:
         return jsonify(error=f"Could not open picker: {exc}"), 500
 
@@ -184,7 +235,7 @@ def generate():
             data = request.get_json(silent=True) or {}
             name = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(3) + ".png"
             output = OUT / name
-            cmd = build_command(config_read(), data, output)
+            cmd = build_command(setup_payload()["config"], data, output)
         except (ValueError, TypeError, OSError) as exc:
             return jsonify(error=str(exc)), 400
         STATE.update(running=True, log=[], error=None, output=None, returncode=None)
