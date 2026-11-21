@@ -26,7 +26,7 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 LOCK = threading.Lock()
 CURRENT_PROCESS = None
-STATE = {"running": False, "log": [], "error": None, "output": None, "returncode": None, "progress": None, "stage": "Ready"}
+STATE = {"running": False, "log": [], "error": None, "output": None, "returncode": None, "progress": None, "stage": "Ready", "cancel_requested": False}
 FIELDS = ("cli", "engine_dir", "model", "encoder", "vae", "lora", "upscaler")
 
 
@@ -378,6 +378,7 @@ def cancel_generation():
         if not proc or proc.poll() is not None:
             return jsonify(cancelled=False, message="No generation is running")
         STATE["stage"] = "Cancelling"
+        STATE["cancel_requested"] = True
         STATE["error"] = None
     try:
         proc.terminate()
@@ -612,6 +613,9 @@ def run_generator(cmd, output):
                 STATE["progress"] = 100
                 STATE["stage"] = "Complete"
                 STATE["output"] = output.name
+            elif STATE.get("cancel_requested"):
+                STATE["stage"] = "Cancelled"
+                STATE["error"] = None
             else:
                 STATE["error"] = "Generator failed or produced no PNG; inspect the log."
     except Exception as exc:
@@ -716,7 +720,7 @@ def generate():
             cmd = build_command(setup_payload()["config"], data, output)
         except (ValueError, TypeError, OSError) as exc:
             return jsonify(error=str(exc)), 400
-        STATE.update(running=True, log=[], error=None, output=None, returncode=None, progress=None, stage="Preparing model")
+        STATE.update(running=True, log=[], error=None, output=None, returncode=None, progress=None, stage="Preparing model", cancel_requested=False)
         threading.Thread(target=run_generator, args=(cmd, output), daemon=True).start()
     return jsonify(started=True)
 
