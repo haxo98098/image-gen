@@ -181,6 +181,13 @@ def discover_companions(cfg):
                 cfg["vae"] = str(old_model.resolve())
             cfg["model"] = ""
 
+    # The migration above may have cleared a bad old model selection (for example,
+    # the Qwen3-VL encoder). Detect the real diffusion model immediately afterward.
+    if not cfg.get("model"):
+        detected_model = find_qwen_image_model()
+        if detected_model:
+            cfg["model"] = str(detected_model)
+
     model = Path(cfg["model"]).expanduser() if cfg.get("model") else None
 
     # Engine: use the selected stable-diffusion.cpp folder, PATH, then nearby app folders.
