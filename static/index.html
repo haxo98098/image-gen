@@ -23,6 +23,13 @@ button,input,textarea,select{font:inherit}button{color:inherit}
 .modelCard{border:1px solid var(--line);background:var(--panel);border-radius:12px;padding:12px}.modelName{font-size:13px;font-weight:650;overflow-wrap:anywhere}.modelMeta{font-size:12px;color:var(--soft);margin-top:6px;line-height:1.4}
 .sideBtn{width:100%;margin-top:9px;border:1px solid #343b47;background:#1a1f27;border-radius:10px;padding:9px 10px;cursor:pointer}.sideBtn:hover{background:#222832}
 .statusList{display:grid;gap:7px}.statusLine{font-size:12px;padding:9px 10px;border-radius:9px;background:#11151b;border:1px solid #222833;overflow-wrap:anywhere}.statusLine.ok{color:#9ee8ba}.statusLine.bad{color:#ffb1b1}
+.sideGallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.sideGalleryEmpty{font-size:12px;color:#737c8b;padding:8px 4px}
+.sideThumb{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;border:1px solid #2a303a;background:#090c10;cursor:pointer}
+.sideThumb:hover{border-color:#4b5565}.sideThumb img{width:100%;height:100%;display:block;object-fit:cover}
+.sideThumbDelete{position:absolute;top:4px;right:4px;width:22px;height:22px;border:0;border-radius:50%;padding:0;background:#111c;color:#fff;cursor:pointer;opacity:0;transition:opacity .15s ease}
+.sideThumb:hover .sideThumbDelete{opacity:1}.sideThumbDelete:hover{background:#4a2027}
+.galleryMore{width:100%;margin-top:8px;border:1px solid #2d3440;background:#141920;border-radius:9px;padding:8px;color:#aeb7c5;cursor:pointer;font-size:12px}.galleryMore:hover{background:#1b212a}
 .select{width:100%;border:1px solid #343b47;background:#151a21;color:#e9edf5;border-radius:9px;padding:9px 10px;outline:none}
 .help{font-size:11px;color:#7f8998;line-height:1.45;margin-top:8px}
 .main{min-width:0;min-height:0;position:relative;display:flex;flex-direction:column;background:radial-gradient(circle at 50% 0%,rgba(139,92,246,.06),transparent 34%),var(--bg)}
@@ -67,6 +74,11 @@ button,input,textarea,select{font:inherit}button{color:inherit}
   <div class="sideSection"><div class="sideTitle">Local runtime</div><div class="statusList">
     <div id="stEngine" class="statusLine">Engine: checking…</div><div id="stEncoder" class="statusLine">Encoder: checking…</div><div id="stVae" class="statusLine">VAE: checking…</div>
   </div></div>
+  <div class="sideSection">
+    <div class="sideTitle">Gallery</div>
+    <div id="sideGallery" class="sideGallery"><div class="sideGalleryEmpty">No images yet.</div></div>
+    <button id="galleryMore" class="galleryMore" type="button">Show all in feed</button>
+  </div>
   <div class="sideSection"><div class="sideTitle">Ollama vision helper</div><div class="modelCard">
     <select id="ollamaModel" class="select"><option value="">Checking Ollama…</option></select>
     <button id="refreshOllama" class="sideBtn">Refresh installed models</button>
@@ -131,7 +143,7 @@ function imageTurn(name,prompt="",size=defaultSize){
   }
   const open=document.createElement("a");open.className="openBtn";open.href=img.src;open.target="_blank";open.rel="noopener";open.textContent="Open";
   const del=document.createElement("button");del.className="miniBtn deleteBtn";del.textContent="Delete";
-  del.onclick=async()=>{if(!confirm("Delete this generated image?"))return;try{await api("/api/images/"+encodeURIComponent(name),{method:"DELETE"});turn.remove();ensureEmpty();toast("Image deleted")}catch(e){toast(e.message)}};
+  del.onclick=async()=>{if(!confirm("Delete this generated image?"))return;try{await api("/api/images/"+encodeURIComponent(name),{method:"DELETE"});turn.remove();ensureEmpty();await refreshSidebarGallery();toast("Image deleted")}catch(e){toast(e.message)}};
   actions.append(open,del);bar.append(label,actions);frame.append(img,bar);reply.append(frame);turn.append(reply);$("#feedInner").append(turn);return turn;
 }
 function drawGenerationField(canvas){
@@ -186,6 +198,33 @@ async function loadHistory(){
   for(const name of [...data.images].reverse())imageTurn(name);scrollBottom();
 }
 
+async function refreshSidebarGallery(){
+  const data=await api("/api/gallery"),box=$("#sideGallery");
+  box.replaceChildren();
+  const images=(data.images||[]).slice(0,12);
+  if(!images.length){const empty=document.createElement("div");empty.className="sideGalleryEmpty";empty.textContent="No images yet.";box.append(empty);return}
+  for(const name of images){
+    const card=document.createElement("div");card.className="sideThumb";card.title=name;
+    const img=document.createElement("img");img.src="/outputs/"+encodeURIComponent(name);img.loading="lazy";img.alt="Generated image";
+    card.onclick=()=>{
+      const target=$("#feedInner").querySelector('.turn[data-name="'+CSS.escape(name)+'"]');
+      if(target){target.scrollIntoView({behavior:"smooth",block:"center"});return}
+      window.open("/outputs/"+encodeURIComponent(name),"_blank","noopener");
+    };
+    const del=document.createElement("button");del.className="sideThumbDelete";del.textContent="×";del.title="Delete image";
+    del.onclick=async event=>{
+      event.stopPropagation();
+      if(!confirm("Delete this generated image?"))return;
+      try{
+        await api("/api/images/"+encodeURIComponent(name),{method:"DELETE"});
+        const target=$("#feedInner").querySelector('.turn[data-name="'+CSS.escape(name)+'"]');if(target)target.remove();
+        ensureEmpty();await refreshSidebarGallery();toast("Image deleted");
+      }catch(e){toast(e.message)}
+    };
+    card.append(img,del);box.append(card);
+  }
+}
+
 function renderRefs(){
   const strip=$("#refStrip");strip.replaceChildren();strip.classList.toggle("show",references.length>0);
   for(const ref of references){
@@ -229,7 +268,7 @@ async function poll(){
   try{
     const s=await api("/api/status");running=!!s.running;$("#log").textContent=(s.log&&s.log.length?s.log.join("\n"):"No generation started.");setGenerating(running,s.progress,s.stage);$("#generate").disabled=running||!setupReady;
     if(s.error&&s.error!==lastError){lastError=s.error;toast(s.error)}else if(!s.error){lastError=null}
-    if(s.output&&s.output!==lastOutput){lastOutput=s.output;setGenerating(false);imageTurn(s.output,currentPrompt);currentPrompt="";scrollBottom()}
+    if(s.output&&s.output!==lastOutput){lastOutput=s.output;setGenerating(false);imageTurn(s.output,currentPrompt);currentPrompt="";await refreshSidebarGallery();scrollBottom()}
     if(!running)await refreshSetup();
   }catch(e){toast(e.message)}
 }
@@ -244,9 +283,10 @@ $("#selectModel").onclick=()=>choose("model").catch(e=>toast(e.message));$("#sel
 $("#generate").onclick=generate;$("#prompt").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();generate()}});
 $("#attach").onclick=()=>$("#referenceInput").click();$("#referenceInput").onchange=e=>{uploadReferences([...e.target.files]);e.target.value=""};$("#analyzeRefs").onclick=analyzeRefs;
 $("#refreshOllama").onclick=refreshOllama;$("#ollamaModel").onchange=e=>localStorage.setItem("ollamaVisionModel",e.target.value);
+$("#galleryMore").onclick=()=>{$("#feed").scrollTo({top:$("#feed").scrollHeight,behavior:"smooth"})};
 $("#logToggle").onclick=()=>$("#logDrawer").classList.toggle("open");$("#logClose").onclick=()=>$("#logDrawer").classList.remove("open");
 
-renderRefs();Promise.all([refreshSetup(),loadHistory(),refreshOllama()]).catch(e=>toast(e.message));poll();setInterval(poll,1500);
+renderRefs();Promise.all([refreshSetup(),loadHistory(),refreshSidebarGallery(),refreshOllama()]).catch(e=>toast(e.message));poll();setInterval(poll,1500);
 </script>
 </body>
 </html>
