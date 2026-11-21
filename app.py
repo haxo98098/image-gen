@@ -107,6 +107,21 @@ REQUIRED = ("cli", "model", "encoder", "vae")
 def discover_companions(cfg):
     """Resolve the engine and companion model files with minimal user setup."""
     cfg = dict(cfg)
+
+    # Migrate old UI mistakes: an encoder/VAE selected in the former "diffusion model" field
+    # should not be treated as the image model.
+    if cfg.get("model"):
+        old_model = Path(cfg["model"]).expanduser()
+        lower = old_model.name.lower()
+        if old_model.is_file() and any(word in lower for word in ("qwen3vl", "qwen3-vl", "qwen3_vl", "text_encoder", "text-encoder")):
+            if not cfg.get("encoder"):
+                cfg["encoder"] = str(old_model.resolve())
+            cfg["model"] = ""
+        elif old_model.is_file() and ("vae" in lower or "autoencoder" in lower):
+            if not cfg.get("vae"):
+                cfg["vae"] = str(old_model.resolve())
+            cfg["model"] = ""
+
     model = Path(cfg["model"]).expanduser() if cfg.get("model") else None
 
     # Engine: use the selected stable-diffusion.cpp folder, PATH, then nearby app folders.
