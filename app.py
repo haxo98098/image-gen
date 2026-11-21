@@ -26,7 +26,9 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 LOCK = threading.Lock()
 CURRENT_PROCESS = None
-STATE = {"running": False, "log": [], "error": None, "output": None, "returncode": None, "progress": None, "stage": "Ready", "cancel_requested": False}
+JOB_QUEUE = []
+QUEUE_WORKER_ACTIVE = False
+STATE = {"running": False, "log": [], "error": None, "output": None, "returncode": None, "progress": None, "stage": "Ready", "cancel_requested": False, "queue_count": 0, "current_prompt": ""}
 FIELDS = ("cli", "engine_dir", "model", "encoder", "vae", "lora", "upscaler")
 
 
@@ -374,6 +376,8 @@ def image_as_reference(name):
 def cancel_generation():
     global CURRENT_PROCESS
     with LOCK:
+        JOB_QUEUE.clear()
+        STATE["queue_count"] = 0
         proc = CURRENT_PROCESS
         if not proc or proc.poll() is not None:
             return jsonify(cancelled=False, message="No generation is running")
@@ -708,21 +712,56 @@ def build_command(cfg, data, output):
     return cmd
 
 
+def queue_worker():
+    global QUEUE_WORKER_ACTIVE
+    while True:
+        with LOCK:
+            if not JOB_QUEUE:
+                QUEUE_WORKER_ACTIVE = False
+                STATE["queue_count"] = 0
+                if not STATE["running"]:
+                    STATE["stage"] = "Ready"
+                return
+            job = JOB_QUEUE.pop(0)
+            STATE.update(
+                running=True,
+                log=[],
+                error=None,
+                output=None,
+                returncode=None,
+                progress=None,
+                stage="Preparing model",
+                cancel_requested=False,
+                queue_count=len(JOB_QUEUE),
+                current_prompt=job["prompt"],
+            )
+        run_generator(job["cmd"], job["output"])
+
+
 @app.post("/api/generate")
 def generate():
+    global QUEUE_WORKER_ACTIVE
+    try:
+        data = request.get_json(silent=True) or {}
+        prompt = str(data.get("prompt", "")).strip()
+        name = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(3) + ".png"
+        output = OUT / name
+        cmd = build_command(setup_payload()["config"], data, output)
+    except (ValueError, TypeError, OSError) as exc:
+        return jsonify(error=str(exc)), 400
+
+    start_worker = False
     with LOCK:
-        if STATE["running"]:
-            return jsonify(error="A generation is already running"), 409
-        try:
-            data = request.get_json(silent=True) or {}
-            name = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(3) + ".png"
-            output = OUT / name
-            cmd = build_command(setup_payload()["config"], data, output)
-        except (ValueError, TypeError, OSError) as exc:
-            return jsonify(error=str(exc)), 400
-        STATE.update(running=True, log=[], error=None, output=None, returncode=None, progress=None, stage="Preparing model", cancel_requested=False)
-        threading.Thread(target=run_generator, args=(cmd, output), daemon=True).start()
-    return jsonify(started=True)
+        if len(JOB_QUEUE) >= 8:
+            return jsonify(error="Generation queue is full (8 waiting jobs)"), 409
+        JOB_QUEUE.append({"cmd": cmd, "output": output, "prompt": prompt})
+        STATE["queue_count"] = len(JOB_QUEUE)
+        if not QUEUE_WORKER_ACTIVE:
+            QUEUE_WORKER_ACTIVE = True
+            start_worker = True
+    if start_worker:
+        threading.Thread(target=queue_worker, daemon=True).start()
+    return jsonify(queued=True, queue_count=STATE["queue_count"])
 
 
 if __name__ == "__main__":
