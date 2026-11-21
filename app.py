@@ -5,18 +5,24 @@ import secrets
 import shutil
 import subprocess
 import threading
+import base64
+import urllib.error
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from tkinter import Tk, filedialog
 
 from flask import Flask, jsonify, request, send_from_directory
+from werkzeug.utils import secure_filename
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "outputs"
 OUT.mkdir(exist_ok=True)
+REFS = ROOT / "references"
+REFS.mkdir(exist_ok=True)
 CONFIG = ROOT / "local-config.json"
 app = Flask(__name__, static_folder="static", static_url_path="")
-app.config["MAX_CONTENT_LENGTH"] = 1_000_000
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 LOCK = threading.Lock()
 STATE = {"running": False, "log": [], "error": None, "output": None, "returncode": None}
 FIELDS = ("cli", "engine_dir", "model", "encoder", "vae")
@@ -344,6 +350,130 @@ def output_file(name):
     return send_from_directory(OUT, name)
 
 
+@app.get("/references/<name>")
+def reference_file(name):
+    return send_from_directory(REFS, name)
+
+
+def safe_named_file(folder, name, suffixes):
+    clean = secure_filename(str(name or ""))
+    if not clean or clean != name:
+        raise ValueError("Invalid filename")
+    path = (folder / clean).resolve()
+    if path.parent != folder.resolve() or path.suffix.lower() not in suffixes or not path.is_file():
+        raise ValueError("File not found")
+    return path
+
+
+@app.delete("/api/images/<name>")
+def delete_image(name):
+    try:
+        path = safe_named_file(OUT, name, (".png", ".jpg", ".jpeg", ".webp"))
+        path.unlink()
+        with LOCK:
+            if STATE.get("output") == name:
+                STATE["output"] = None
+        return jsonify(deleted=name)
+    except (ValueError, OSError) as exc:
+        return jsonify(error=str(exc)), 404
+
+
+@app.post("/api/references")
+def upload_references():
+    files = request.files.getlist("images")
+    if not files:
+        return jsonify(error="Choose at least one reference image"), 400
+    if len(files) > 10:
+        return jsonify(error="Qwen-Image 2.1 supports up to 10 reference images"), 400
+    saved = []
+    allowed = {".png", ".jpg", ".jpeg", ".webp"}
+    for item in files:
+        original = secure_filename(item.filename or "")
+        suffix = Path(original).suffix.lower()
+        if suffix not in allowed:
+            return jsonify(error=f"Unsupported reference image type: {suffix or 'unknown'}"), 400
+        name = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(4) + suffix
+        destination = REFS / name
+        item.save(destination)
+        saved.append({"name": name, "url": f"/references/{name}"})
+    return jsonify(images=saved)
+
+
+@app.delete("/api/references/<name>")
+def delete_reference(name):
+    try:
+        path = safe_named_file(REFS, name, (".png", ".jpg", ".jpeg", ".webp"))
+        path.unlink()
+        return jsonify(deleted=name)
+    except (ValueError, OSError) as exc:
+        return jsonify(error=str(exc)), 404
+
+
+def ollama_request(path, payload=None, timeout=20):
+    url = "http://127.0.0.1:11434" + path
+    body = None if payload is None else json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json"} if body is not None else {},
+        method="POST" if body is not None else "GET",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+@app.get("/api/ollama/models")
+def ollama_models():
+    try:
+        data = ollama_request("/api/tags")
+        models = []
+        for item in data.get("models", []):
+            name = item.get("name") or item.get("model")
+            if name:
+                models.append(name)
+        return jsonify(available=True, models=models)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        return jsonify(available=False, models=[], error=f"Ollama is not reachable at 127.0.0.1:11434: {exc}")
+
+
+@app.post("/api/ollama/analyze")
+def ollama_analyze():
+    data = request.get_json(silent=True) or {}
+    model = str(data.get("model", "")).strip()
+    references = data.get("references") or []
+    instruction = str(data.get("instruction", "")).strip()
+    if not model:
+        return jsonify(error="Choose an installed Ollama model"), 400
+    if not references:
+        return jsonify(error="Attach at least one reference image"), 400
+    if len(references) > 10:
+        return jsonify(error="Too many reference images"), 400
+    encoded = []
+    try:
+        for name in references:
+            path = safe_named_file(REFS, str(name), (".png", ".jpg", ".jpeg", ".webp"))
+            encoded.append(base64.b64encode(path.read_bytes()).decode("ascii"))
+        user_text = instruction or "Study these reference images and write a detailed image-generation prompt that preserves their important visual traits."
+        payload = {
+            "model": model,
+            "stream": False,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a visual prompt assistant. Inspect the supplied reference images and return only a useful, concrete image-generation prompt. Preserve requested identity, clothing, composition, lighting, style, and other visible details. Do not add commentary before or after the prompt.",
+                },
+                {"role": "user", "content": user_text, "images": encoded},
+            ],
+        }
+        result = ollama_request("/api/chat", payload, timeout=180)
+        text = ((result.get("message") or {}).get("content") or "").strip()
+        if not text:
+            raise ValueError("Ollama returned an empty response")
+        return jsonify(prompt=text)
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        return jsonify(error=f"Ollama vision request failed: {exc}"), 502
+
+
 def run_generator(cmd, output):
     try:
         with subprocess.Popen(
@@ -393,6 +523,15 @@ def build_command(cfg, data, output):
     ]
     if data.get("flash_attention", True):
         cmd.append("--diffusion-fa")
+
+    references = data.get("references") or []
+    if len(references) > 10:
+        raise ValueError("Qwen-Image 2.1 supports up to 10 reference images")
+    for name in references:
+        ref = safe_named_file(REFS, str(name), (".png", ".jpg", ".jpeg", ".webp"))
+        cmd += ["-r", str(ref)]
+    if references:
+        cmd += ["--ref-image-args", "preset=qwen"]
     return cmd
 
 
