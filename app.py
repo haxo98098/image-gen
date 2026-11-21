@@ -121,7 +121,12 @@ def discover_companions(cfg):
         if cmd:
             cfg["cli"] = str(Path(cmd).resolve())
         else:
-            for folder in (ROOT, ROOT / "bin", ROOT / "stable-diffusion.cpp"):
+            for folder in dict.fromkeys((
+                model.parent if model and model.is_file() else ROOT,
+                model.parent.parent if model and model.is_file() else ROOT,
+                ROOT, ROOT / "bin", ROOT / "stable-diffusion.cpp",
+                Path.home() / "Downloads",
+            )):
                 found = find_sd_cli(folder)
                 if found:
                     cfg["cli"] = str(found)
