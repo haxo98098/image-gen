@@ -25,8 +25,9 @@ CONFIG = ROOT / "local-config.json"
 app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 LOCK = threading.Lock()
+CURRENT_PROCESS = None
 STATE = {"running": False, "log": [], "error": None, "output": None, "returncode": None, "progress": None, "stage": "Ready"}
-FIELDS = ("cli", "engine_dir", "model", "encoder", "vae")
+FIELDS = ("cli", "engine_dir", "model", "encoder", "vae", "lora", "upscaler")
 
 
 def config_read():
@@ -54,6 +55,8 @@ def local_path(value, field, required=False):
         "model": (".gguf", ".safetensors"),
         "encoder": (".gguf", ".safetensors"),
         "vae": (".gguf", ".safetensors"),
+        "lora": (".gguf", ".safetensors"),
+        "upscaler": (".pth", ".pt", ".safetensors", ".gguf"),
     }
     if path.suffix.lower() not in allowed[field]:
         raise ValueError(f"Unexpected {field} file type")
@@ -77,8 +80,12 @@ def pick_file(field):
                 mustexist=True,
                 parent=root,
             )
-        types = ([("Executables", "*.exe")] if field == "cli"
-                 else [("Model files", "*.gguf *.safetensors")])
+        if field == "cli":
+            types = [("Executables", "*.exe")]
+        elif field == "upscaler":
+            types = [("Upscaler models", "*.pth *.pt *.safetensors *.gguf")]
+        else:
+            types = [("Model files", "*.gguf *.safetensors")]
         return filedialog.askopenfilename(
             title="Select " + field,
             filetypes=types + [("All files", "*.*")],
@@ -351,6 +358,36 @@ def output_file(name):
     return send_from_directory(OUT, name)
 
 
+@app.post("/api/images/<name>/reference")
+def image_as_reference(name):
+    try:
+        source = safe_named_file(OUT, name, (".png", ".jpg", ".jpeg", ".webp"))
+        target_name = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + secrets.token_hex(4) + source.suffix.lower()
+        target = REFS / target_name
+        shutil.copy2(source, target)
+        return jsonify(name=target_name, url=f"/references/{target_name}")
+    except (ValueError, OSError) as exc:
+        return jsonify(error=str(exc)), 404
+
+
+@app.post("/api/cancel")
+def cancel_generation():
+    global CURRENT_PROCESS
+    with LOCK:
+        proc = CURRENT_PROCESS
+        if not proc or proc.poll() is not None:
+            return jsonify(cancelled=False, message="No generation is running")
+        STATE["stage"] = "Cancelling"
+        STATE["error"] = None
+    try:
+        proc.terminate()
+        return jsonify(cancelled=True)
+    except OSError as exc:
+        return jsonify(error=f"Could not cancel generation: {exc}"), 500
+
+
+
+
 @app.get("/references/<name>")
 def reference_file(name):
     return send_from_directory(REFS, name)
@@ -408,6 +445,71 @@ def delete_reference(name):
         return jsonify(deleted=name)
     except (ValueError, OSError) as exc:
         return jsonify(error=str(exc)), 404
+
+
+SAMPLERS = {
+    "euler", "euler_a", "heun", "dpm2", "dpm++2s_a", "dpm++2m", "dpm++2mv2",
+    "ipndm", "ipndm_v", "lcm", "ddim_trailing", "tcd", "res_multistep", "res_2s",
+    "er_sde", "euler_cfg_pp", "euler_a_cfg_pp", "euler_ge", "dpm++2m_sde",
+    "dpm++2m_sde_bt", "lms"
+}
+SCHEDULERS = {
+    "auto", "discrete", "karras", "exponential", "ays", "gits", "sgm_uniform",
+    "simple", "smoothstep", "kl_optimal", "lcm", "bong_tangent", "ltx2",
+    "logit_normal", "flux2", "flux", "beta", "llada_image"
+}
+
+
+@app.post("/api/prompt-assist")
+def prompt_assist():
+    data = request.get_json(silent=True) or {}
+    primary = str(data.get("prompt", "")).strip()
+    if not primary:
+        return jsonify(error="Enter a prompt first"), 400
+    if len(primary) > 6000:
+        return jsonify(error="Prompt is too long"), 400
+
+    mode = str(data.get("mode", "generate")).strip().lower()
+    use_case = str(data.get("use_case", "auto")).strip().lower()
+    preserve = str(data.get("preserve", "")).strip()
+    avoid = str(data.get("avoid", "")).strip()
+    reference_count = max(0, min(10, int(data.get("reference_count", 0) or 0)))
+
+    lines = []
+    if use_case != "auto":
+        lines.append(f"Use case: {use_case}")
+    lines.append(f"Primary request: {primary}")
+
+    if reference_count:
+        if mode == "edit":
+            lines.append("Input images: Image 1 is the edit target" + (
+                "; remaining images are supporting references" if reference_count > 1 else ""
+            ))
+        else:
+            roles = ", ".join(f"Image {i}: reference image" for i in range(1, reference_count + 1))
+            lines.append(f"Input images: {roles}")
+
+    if mode == "edit":
+        base_constraint = "Change only the requested elements; keep all unrequested parts of the edit target unchanged."
+        lines.append(f"Constraints: {base_constraint}" + (f" Preserve: {preserve}" if preserve else ""))
+    elif preserve:
+        lines.append(f"Constraints: Preserve: {preserve}")
+
+    if use_case == "photorealistic":
+        lines.append("Style/medium: photorealistic; natural real-world texture and detail; avoid over-stylized polish unless requested.")
+    elif use_case == "illustration":
+        lines.append("Style/medium: illustration; keep the requested subject and composition clear.")
+    elif use_case == "product":
+        lines.append("Output intent: polished product image with clear silhouette, material detail, and practical composition.")
+    elif use_case == "ui":
+        lines.append("Output intent: practical shippable UI mockup with clear hierarchy and readable layout.")
+
+    if avoid:
+        lines.append(f"Avoid: {avoid}")
+    elif mode == "generate":
+        lines.append("Constraints: Do not add extra subjects, props, text, or story elements that are not implied by the request.")
+
+    return jsonify(prompt="\n".join(lines))
 
 
 def ollama_request(path, payload=None, timeout=20):
@@ -476,12 +578,15 @@ def ollama_analyze():
 
 
 def run_generator(cmd, output):
+    global CURRENT_PROCESS
     try:
         with subprocess.Popen(
             cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, errors="replace", bufsize=1,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
         ) as proc:
+            with LOCK:
+                CURRENT_PROCESS = proc
             for line in proc.stdout:
                 clean = line.rstrip()
                 with LOCK:
@@ -514,6 +619,7 @@ def run_generator(cmd, output):
             STATE["error"] = str(exc)
     finally:
         with LOCK:
+            CURRENT_PROCESS = None
             STATE["running"] = False
 
 
@@ -522,24 +628,62 @@ def build_command(cfg, data, output):
     model = local_path(cfg.get("model"), "model", True)
     encoder = local_path(cfg.get("encoder"), "encoder", True)
     vae = local_path(cfg.get("vae"), "vae", True)
+
     prompt = str(data.get("prompt", "")).strip()
+    negative = str(data.get("negative_prompt", "")).strip()
     if not prompt or len(prompt) > 6000:
         raise ValueError("Enter a prompt up to 6000 characters")
+    if len(negative) > 4000:
+        raise ValueError("Negative prompt is too long")
+
     width, height = int(data.get("width", 1024)), int(data.get("height", 1024))
     if any(n < 256 or n > 2048 or n % 32 for n in (width, height)):
         raise ValueError("Width and height must be multiples of 32, from 256 to 2048")
+
     seed = int(data.get("seed", -1))
     if not -1 <= seed <= 2147483647:
         raise ValueError("Seed is out of range")
+
+    steps = int(data.get("steps", 20))
+    if not 1 <= steps <= 100:
+        raise ValueError("Steps must be between 1 and 100")
+
+    cfg_scale = float(data.get("cfg_scale", 6.0))
+    if not 0 <= cfg_scale <= 20:
+        raise ValueError("CFG scale must be between 0 and 20")
+
+    sampler = str(data.get("sampler", "euler")).strip()
+    if sampler not in SAMPLERS:
+        raise ValueError("Unsupported sampling method")
+
+    scheduler = str(data.get("scheduler", "auto")).strip()
+    if scheduler not in SCHEDULERS:
+        raise ValueError("Unsupported scheduler")
+
+    use_lora = bool(data.get("use_lora"))
+    if use_lora:
+        lora = local_path(cfg.get("lora"), "lora", True)
+        strength = float(data.get("lora_strength", 1.0))
+        if not 0 <= strength <= 2:
+            raise ValueError("LoRA strength must be between 0 and 2")
+        prompt = prompt + f" <lora:{lora.stem}:{strength:g}>"
+
     cmd = [
         str(cli), "--diffusion-model", str(model), "--llm", str(encoder),
         "--vae", str(vae), "-p", prompt, "-W", str(width), "-H", str(height),
-        "--seed", str(seed), "--steps", "20", "--cfg-scale", "6.0",
-        "--sampling-method", "euler", "--rng", "cpu", "--offload-to-cpu", "--vae-tiling",
+        "--seed", str(seed), "--steps", str(steps), "--cfg-scale", str(cfg_scale),
+        "--sampling-method", sampler, "--rng", "cpu", "--offload-to-cpu", "--vae-tiling",
         "-o", str(output),
     ]
+    if scheduler != "auto":
+        cmd += ["--scheduler", scheduler]
+    if negative:
+        cmd += ["--negative-prompt", negative]
     if data.get("flash_attention", True):
         cmd.append("--diffusion-fa")
+
+    if use_lora:
+        cmd += ["--lora-model-dir", str(lora.parent)]
 
     references = data.get("references") or []
     if len(references) > 10:
@@ -549,6 +693,14 @@ def build_command(cfg, data, output):
         cmd += ["-r", str(ref)]
     if references:
         cmd += ["--ref-image-args", "preset=qwen"]
+
+    if data.get("use_upscaler"):
+        upscaler = local_path(cfg.get("upscaler"), "upscaler", True)
+        repeats = int(data.get("upscale_repeats", 1))
+        if not 1 <= repeats <= 2:
+            raise ValueError("Upscale repeats must be 1 or 2")
+        cmd += ["--upscale-model", str(upscaler), "--upscale-repeats", str(repeats)]
+
     return cmd
 
 
