@@ -164,7 +164,7 @@ button{color:inherit}
 
 <script>
 const $=s=>document.querySelector(s);
-let lastOutput=null,setupReady=false,currentPrompt="",historyLoaded=false;
+let lastOutput=null,lastError=null,setupReady=false,currentPrompt="",historyLoaded=false;
 
 async function api(url,options){
   const response=await fetch(url,options);
@@ -227,6 +227,7 @@ async function loadHistory(){
   if(historyLoaded)return;historyLoaded=true;
   const data=await api("/api/gallery");
   if(!data.images?.length)return;
+  lastOutput=data.images[0]||lastOutput;
   removeEmpty();
   for(const name of [...data.images].reverse()) imageTurn(name);
   scrollBottom();
@@ -237,7 +238,7 @@ async function poll(){
     $("#log").textContent=(s.log&&s.log.length?s.log.join("\n"):"No generation started.");
     setGenerating(!!s.running);
     $("#generate").disabled=!!s.running||!setupReady;
-    if(s.error){toast(s.error)}
+    if(s.error&&s.error!==lastError){lastError=s.error;toast(s.error)}else if(!s.error){lastError=null}
     if(s.output&&s.output!==lastOutput){
       lastOutput=s.output;setGenerating(false);imageTurn(s.output,currentPrompt);currentPrompt="";scrollBottom();
     }
