@@ -1,5 +1,6 @@
 """Local-only Qwen-Image 2.1 frontend for stable-diffusion.cpp."""
 import json
+import re
 import os
 import secrets
 import shutil
@@ -24,7 +25,7 @@ CONFIG = ROOT / "local-config.json"
 app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 LOCK = threading.Lock()
-STATE = {"running": False, "log": [], "error": None, "output": None, "returncode": None}
+STATE = {"running": False, "log": [], "error": None, "output": None, "returncode": None, "progress": None, "stage": "Ready"}
 FIELDS = ("cli", "engine_dir", "model", "encoder", "vae")
 
 
@@ -482,13 +483,29 @@ def run_generator(cmd, output):
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
         ) as proc:
             for line in proc.stdout:
+                clean = line.rstrip()
                 with LOCK:
-                    STATE["log"].append(line.rstrip()[:1000])
+                    STATE["log"].append(clean[:1000])
                     STATE["log"] = STATE["log"][-150:]
+
+                    # stable-diffusion.cpp prints sampling progress as "... 3/20 - 1.23s/it".
+                    # This is real denoising-step progress, not a fake timer.
+                    match = re.search(r"\b(\d+)\s*/\s*(\d+)\s*-\s*", clean)
+                    if match:
+                        completed, total = int(match.group(1)), int(match.group(2))
+                        if total > 0 and 0 <= completed <= total:
+                            STATE["progress"] = min(96, round((completed / total) * 96))
+                            STATE["stage"] = "Creating image"
+                    lower = clean.lower()
+                    if any(word in lower for word in ("decode", "decoding", "vae")) and STATE.get("progress") is not None:
+                        STATE["progress"] = max(STATE["progress"], 97)
+                        STATE["stage"] = "Finishing image"
             code = proc.wait()
         with LOCK:
             STATE["returncode"] = code
             if code == 0 and output.is_file():
+                STATE["progress"] = 100
+                STATE["stage"] = "Complete"
                 STATE["output"] = output.name
             else:
                 STATE["error"] = "Generator failed or produced no PNG; inspect the log."
@@ -547,7 +564,7 @@ def generate():
             cmd = build_command(setup_payload()["config"], data, output)
         except (ValueError, TypeError, OSError) as exc:
             return jsonify(error=str(exc)), 400
-        STATE.update(running=True, log=[], error=None, output=None, returncode=None)
+        STATE.update(running=True, log=[], error=None, output=None, returncode=None, progress=None, stage="Preparing model")
         threading.Thread(target=run_generator, args=(cmd, output), daemon=True).start()
     return jsonify(started=True)
 
