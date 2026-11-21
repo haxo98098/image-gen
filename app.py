@@ -112,8 +112,17 @@ def is_qwen_image_model(path):
     if not path or not path.is_file() or path.suffix.lower() not in (".gguf", ".safetensors"):
         return False
     lower = path.name.lower()
-    if any(word in lower for word in ("qwen3vl", "qwen3-vl", "qwen3_vl", "text_encoder", "text-encoder", "vae", "autoencoder")):
+    # Never mistake known companion components for the diffusion model.
+    if any(word in lower for word in (
+        "qwen3vl", "qwen3-vl", "qwen3_vl",
+        "text_encoder", "text-encoder", "vae", "autoencoder"
+    )):
         return False
+    # GGUF files in this dedicated project folder are valid diffusion-model
+    # candidates even when a community quantizer used a nonstandard filename.
+    if path.suffix.lower() == ".gguf":
+        return True
+    # Safetensors need a stronger filename signal to avoid grabbing random files.
     return ("qwen" in lower and "image" in lower) or lower.startswith("qwen-image-2.1")
 
 
@@ -140,16 +149,26 @@ def find_qwen_image_model():
     def score(path):
         name = path.name.lower()
         rank = 0
+        # Prefer filenames that explicitly identify Qwen Image / desired quant.
+        if "qwen" in name:
+            rank += 100
+        if "image" in name:
+            rank += 100
         for token, value in (
-            ("q4_k_m", 80), ("q5_k_m", 70), ("q6_k", 60),
+            ("2.1", 90), ("q4_k_m", 80), ("q5_k_m", 70), ("q6_k", 60),
             ("q8_0", 50), ("fp8", 40), ("bf16", 30),
             ("uncensored", 20), ("uc", 15),
         ):
             if token in name:
                 rank += value
         if path.suffix.lower() == ".gguf":
-            rank += 5
-        return (-rank, path.name.casefold())
+            rank += 10
+        # If names are unhelpful, prefer the larger model file over tiny utility GGUFs.
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        return (-rank, -size, path.name.casefold())
 
     return sorted(candidates, key=score)[0]
 
