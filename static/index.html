@@ -9,8 +9,8 @@
 *{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0a0d13,#0d111a)}
 header{padding:24px 30px;border-bottom:1px solid #242b3a;background:#111620}
 h1{margin:0;font-size:22px}header p{margin:5px 0 0;color:#8e99ad}
-main{max-width:1280px;margin:auto;padding:24px;display:grid;grid-template-columns:minmax(320px,430px) 1fr;gap:20px}
-.panel{background:#151b26;border:1px solid #293244;border-radius:16px;padding:20px;margin-bottom:18px;box-shadow:0 12px 35px #0003}
+main{max-width:1280px;margin:auto;padding:24px;display:grid;grid-template-columns:minmax(0,430px) minmax(0,1fr);gap:20px;align-items:start}
+.panel{min-width:0;overflow:hidden;background:#151b26;border:1px solid #293244;border-radius:16px;padding:20px;margin-bottom:18px;box-shadow:0 12px 35px #0003}
 h2{font-size:16px;margin:0 0 16px}
 button,input,textarea{font:inherit;border-radius:10px}
 button{border:1px solid #3a4864;background:#26324a;color:#fff;padding:11px 14px;cursor:pointer}
@@ -21,8 +21,8 @@ label{display:block;margin:12px 0 6px;color:#b6c0d4}
 input,textarea{width:100%;padding:11px;background:#0d121b;border:1px solid #313b50;color:#f3f6ff}
 textarea{min-height:130px;resize:vertical}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.statusGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
-.statusItem{padding:10px 12px;border-radius:10px;border:1px solid #2d374a;background:#0f141e;font-size:13px}
+.statusGrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;margin-top:16px;min-width:0}
+.statusItem{min-width:0;padding:10px 12px;border-radius:10px;border:1px solid #2d374a;background:#0f141e;font-size:13px;overflow-wrap:anywhere;word-break:break-word}
 .ok{color:#8de4a7}.bad{color:#ffadad}.muted{color:#8995aa}.name{font-size:13px;color:#aab6c9;margin:10px 0 0;word-break:break-word}
 .notice{margin-top:12px;padding:11px 12px;border-radius:10px;background:#101722;border:1px solid #2d3c54;color:#aebbd0;line-height:1.45}
 #preview{max-width:100%;max-height:650px;border-radius:12px;display:block;margin:auto}
