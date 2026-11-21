@@ -1,122 +1,191 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Qwen Image Studio</title>
 <style>
-:root{color-scheme:dark;font:15px system-ui,sans-serif;background:#0b0d12;color:#edf1f9}
-*{box-sizing:border-box}body{margin:0}header{padding:25px 30px;border-bottom:1px solid #303544;background:#141824}
-h1{margin:0;font-size:23px}small,.muted{color:#a4adbd}
-main{max-width:1380px;padding:22px;margin:auto;display:grid;grid-template-columns:minmax(300px,440px) 1fr;gap:20px}
-.panel{background:#171c28;border:1px solid #2e3446;border-radius:15px;padding:21px;margin-bottom:18px}
-h2{font-size:16px;margin:0 0 16px}label{display:block;margin:12px 0 5px;color:#b6c3d9}
-input,textarea,button{font:inherit;border-radius:9px}
-input,textarea{color:#eef2ff;background:#0d111b;border:1px solid #333d53;padding:11px;width:100%}
-textarea{min-height:115px;resize:vertical}
-button{border:1px solid #465472;background:#29334a;color:white;padding:11px 16px;cursor:pointer}
-button:hover{background:#3b4967}details{margin-top:13px}summary{cursor:pointer;color:#b8c7ed;padding:9px 0}.missing{margin:8px 0;padding:10px;border:1px solid #4a4050;border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:10px}.missing button{font-size:13px}button:disabled{opacity:.55;cursor:default}
-.primary{background:#6f55dd;border-color:#917ff6;width:100%;font-weight:700;padding:15px}
-.field{display:flex;gap:8px}.field input{min-width:0}.field button{flex-shrink:0}
+:root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;background:#0a0d13;color:#eef2fb}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0a0d13,#0d111a)}
+header{padding:24px 30px;border-bottom:1px solid #242b3a;background:#111620}
+h1{margin:0;font-size:22px}header p{margin:5px 0 0;color:#8e99ad}
+main{max-width:1280px;margin:auto;padding:24px;display:grid;grid-template-columns:minmax(320px,430px) 1fr;gap:20px}
+.panel{background:#151b26;border:1px solid #293244;border-radius:16px;padding:20px;margin-bottom:18px;box-shadow:0 12px 35px #0003}
+h2{font-size:16px;margin:0 0 16px}
+button,input,textarea{font:inherit;border-radius:10px}
+button{border:1px solid #3a4864;background:#26324a;color:#fff;padding:11px 14px;cursor:pointer}
+button:hover{background:#33415f}button:disabled{opacity:.55;cursor:not-allowed}
+.primary{width:100%;padding:14px;background:#6e57da;border-color:#8e7af2;font-weight:700}
+.secondary{width:100%;margin-top:10px}
+label{display:block;margin:12px 0 6px;color:#b6c0d4}
+input,textarea{width:100%;padding:11px;background:#0d121b;border:1px solid #313b50;color:#f3f6ff}
+textarea{min-height:130px;resize:vertical}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.checks{display:flex;gap:15px;flex-wrap:wrap;margin:18px 0}
-.checks label{margin:0;display:flex;align-items:center;gap:6px}.checks input{width:auto}
-#preview{max-width:100%;max-height:620px;border-radius:10px}
-#gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:10px}
-#gallery img{width:100%;border-radius:9px}
-pre{white-space:pre-wrap;max-height:240px;overflow:auto;background:#0b101a;padding:14px;border-radius:10px;font-size:12px;color:#aab8cd}
-#status{color:#bcd0ff;min-height:20px}.hint{line-height:1.5;color:#a5afc1}
+.statusGrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:16px}
+.statusItem{padding:10px 12px;border-radius:10px;border:1px solid #2d374a;background:#0f141e;font-size:13px}
+.ok{color:#8de4a7}.bad{color:#ffadad}.muted{color:#8995aa}.name{font-size:13px;color:#aab6c9;margin:10px 0 0;word-break:break-word}
+.notice{margin-top:12px;padding:11px 12px;border-radius:10px;background:#101722;border:1px solid #2d3c54;color:#aebbd0;line-height:1.45}
+#preview{max-width:100%;max-height:650px;border-radius:12px;display:block;margin:auto}
+#gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+#gallery img{width:100%;border-radius:10px;display:block}
+pre{white-space:pre-wrap;max-height:260px;overflow:auto;background:#090d14;border:1px solid #242e40;padding:13px;border-radius:10px;color:#9fb0c9;font-size:12px}
+#runStatus{min-height:20px;color:#b9c9ec}
 @media(max-width:900px){main{display:block}header{padding:18px}}
-</style></head>
+</style>
+</head>
 <body>
-<header><h1>◈ Qwen Image Studio</h1><small>Qwen-Image 2.1 local generation · GGUF · No ComfyUI</small></header>
-<main><section>
-<div class="panel"><h2>Model setup</h2>
+<header>
+<h1>Qwen Image Studio</h1>
+<p>Local Qwen-Image 2.1 generation · no ComfyUI</p>
+</header>
+<main>
+<section>
+<div class="panel">
+<h2>Setup</h2>
 <button id="selectModel" class="primary">Select Qwen-Image 2.1 Model</button>
-<p id="modelName" class="hint">No model selected</p>
-<p id="setupMessage" class="hint">Choose the Qwen-Image 2.1 model. Studio will automatically look for its encoder, VAE, and sd-cli.</p>
-<div id="missingFiles"></div>
-<details><summary>Advanced file settings</summary><div id="files"></div></details>
-</div>
-<div class="panel"><h2>Create / Edit</h2>
-<label for="prompt">Prompt</label><textarea id="prompt" placeholder="Describe the image you want..."></textarea>
-<div class="pair"><div><label for="width">Width</label><input id="width" type="number" value="1024" step="32" min="256" max="2048"></div>
-<div><label for="height">Height</label><input id="height" type="number" value="1024" step="32" min="256" max="2048"></div></div>
-<label for="seed">Seed (-1 for random)</label><input type="number" id="seed" value="-1">
-<details><summary>Advanced generation options</summary>
-<div class="checks">
-<label><input type="checkbox" id="flash_attention" checked>Flash attention</label>
-<label><input type="checkbox" id="use_reference">Use reference image</label>
-<label><input type="checkbox" id="use_lora">Try LoRA (experimental)</label></div>
-<label for="lora_strength">LoRA strength</label><input id="lora_strength" type="number" min="0" max="2" step="0.1" value="1">
-</details>
-<button class="primary" id="generate">Generate image</button>
-<p class="hint">Qwen-Image 2.1 defaults: 20 steps, Euler, CFG 6.0. Third-party LoRAs may be incompatible.</p>
-</div></section>
-<section><div class="panel"><h2>Generation</h2><p id="status">Ready. Select the required model files.</p><div id="result"></div>
-<h2>Generator log</h2><pre id="log">No generation started.</pre></div>
-<div class="panel"><h2>Gallery</h2><div id="gallery"></div></div></section></main>
-<script>
-const labels={cli:"sd-cli executable",model:"MiniMax diffusion model",encoder:"Text encoder",vae:"Image VAE",reference:"Reference image (optional)",lora:"LoRA (experimental)"};
-const files=document.querySelector("#files");
-for(const [key,name] of Object.entries(labels)){
- const row=document.createElement("div"),label=document.createElement("label"),field=document.createElement("div");
- const input=document.createElement("input"),button=document.createElement("button");
- label.htmlFor="f_"+key;label.textContent=name;input.id="f_"+key;input.readOnly=true;input.placeholder="Not selected";
- button.textContent="Browse…";button.dataset.pick=key;field.className="field";field.append(input,button);row.append(label,field);files.append(row);
-}
-let lastOutput=null;
-const requiredLabels={cli:"Generator engine (sd-cli.exe)",encoder:"Qwen3-VL 8B text encoder",vae:"Qwen-Image 2.1 VAE"};
-async function refreshSetup(data){
- const cfg=data.config,missing=data.missing,container=document.querySelector("#missingFiles");
- for(const key of Object.keys(labels))document.getElementById("f_"+key).value=cfg[key]||"";
- document.querySelector("#modelName").textContent=cfg.model?("Selected: "+cfg.model.split(/[\\/]/).pop()):"No model selected";
- document.querySelector("#setupMessage").textContent=missing.includes("model")?"Select your Qwen-Image 2.1 GGUF to begin.":missing.length?"I could not find every required companion file. Select only the missing ones below.":"Qwen-Image 2.1 components found. Ready to generate.";
- container.replaceChildren();
- for(const key of missing.filter(key=>key!=="model")){
-  const row=document.createElement("div"),text=document.createElement("span"),button=document.createElement("button");
-  row.className="missing";text.textContent=requiredLabels[key]||key;button.textContent="Browse…";
-  button.onclick=()=>chooseFile(key);row.append(text,button);container.append(row);
- }
-}
-async function chooseFile(key){
- const data=await api("/api/pick/"+key,{method:"POST"});
- await refreshSetup(data);
-}
-document.querySelector("#selectModel").onclick=async()=>{try{await chooseFile("model")}catch(error){alert(error.message)}};
+<p id="modelName" class="name">No model selected</p>
+<button id="selectEngine" class="secondary">Select stable-diffusion.cpp Folder</button>
 
-async function api(url,options){const response=await fetch(url,options),data=await response.json();if(!response.ok)throw Error(data.error||"Request failed");return data;}
-async function config(){const data=await api("/api/config");await refreshSetup(data);}
-files.addEventListener("click",async event=>{
- const button=event.target.closest("button[data-pick]");if(!button)return;
- button.disabled=true;
- try{await chooseFile(button.dataset.pick);}
- catch(error){alert(error.message);}
- finally{button.disabled=false;}
-});
+<div class="statusGrid">
+<div id="stModel" class="statusItem">Model: checking…</div>
+<div id="stEngine" class="statusItem">Engine: checking…</div>
+<div id="stEncoder" class="statusItem">Text encoder: checking…</div>
+<div id="stVae" class="statusItem">VAE: checking…</div>
+</div>
+
+<div id="setupNotice" class="notice">Choose your model. The app will find the other files automatically.</div>
+<button id="rescan" class="secondary">Rescan setup</button>
+</div>
+
+<div class="panel">
+<h2>Generate</h2>
+<label for="prompt">Prompt</label>
+<textarea id="prompt" placeholder="Describe the image you want..."></textarea>
+<div class="pair">
+<div><label for="width">Width</label><input id="width" type="number" value="1024" min="256" max="2048" step="32"></div>
+<div><label for="height">Height</label><input id="height" type="number" value="1024" min="256" max="2048" step="32"></div>
+</div>
+<label for="seed">Seed (-1 = random)</label>
+<input id="seed" type="number" value="-1">
+<button id="generate" class="primary" style="margin-top:16px">Generate Image</button>
+</div>
+</section>
+
+<section>
+<div class="panel">
+<h2>Result</h2>
+<p id="runStatus">Ready.</p>
+<div id="result"></div>
+<h2 style="margin-top:18px">Log</h2>
+<pre id="log">No generation started.</pre>
+</div>
+
+<div class="panel">
+<h2>Gallery</h2>
+<div id="gallery"><p class="muted">No images yet.</p></div>
+</div>
+</section>
+</main>
+
+<script>
+const $=s=>document.querySelector(s);
+let lastOutput=null;
+
+async function api(url,options){
+  const response=await fetch(url,options);
+  const data=await response.json();
+  if(!response.ok) throw new Error(data.error||"Request failed");
+  return data;
+}
+function filename(path){
+  if(!path) return "";
+  return path.split(/[\\/]/).pop();
+}
+function setState(el,label,ok,detail=""){
+  el.className="statusItem "+(ok?"ok":"bad");
+  el.textContent=label+": "+(ok?"Ready":"Missing")+(detail?" · "+detail:"");
+}
+async function refreshSetup(){
+  const data=await api("/api/config");
+  const c=data.config||{}, missing=new Set(data.missing||[]);
+  $("#modelName").textContent=c.model?filename(c.model):"No model selected";
+  setState($("#stModel"),"Model",!missing.has("model"),c.model?filename(c.model):"");
+  setState($("#stEngine"),"Engine",!missing.has("cli"),c.cli?filename(c.cli):"");
+  setState($("#stEncoder"),"Text encoder",!missing.has("encoder"),c.encoder?filename(c.encoder):"");
+  setState($("#stVae"),"VAE",!missing.has("vae"),c.vae?filename(c.vae):"");
+
+  $("#selectEngine").style.display=missing.has("cli")?"block":"none";
+  const missingNames=[];
+  if(missing.has("encoder")) missingNames.push("text encoder");
+  if(missing.has("vae")) missingNames.push("VAE");
+
+  if(missing.has("model")){
+    $("#setupNotice").textContent="Select your Qwen-Image 2.1 GGUF first.";
+  }else if(missing.has("cli")){
+    $("#setupNotice").textContent="Select the extracted stable-diffusion.cpp folder. I will find sd-cli.exe inside it automatically.";
+  }else if(missingNames.length){
+    $("#setupNotice").textContent="Missing "+missingNames.join(" and ")+". Put those files in the same folder as the model, then click Rescan setup.";
+  }else{
+    $("#setupNotice").textContent="Everything is ready. Enter a prompt and generate.";
+  }
+  $("#generate").disabled=missing.size>0;
+  return data;
+}
+async function choose(field){
+  const data=await api("/api/pick/"+field,{method:"POST"});
+  await refreshSetup();
+  return data;
+}
+$("#selectModel").onclick=async()=>{try{await choose("model")}catch(e){alert(e.message)}};
+$("#selectEngine").onclick=async()=>{try{await choose("engine_dir")}catch(e){alert(e.message)}};
+$("#rescan").onclick=()=>refreshSetup().catch(e=>alert(e.message));
+
 async function gallery(){
- const result=await api("/api/gallery"),container=document.querySelector("#gallery");container.replaceChildren();
- if(!result.images.length){const p=document.createElement("p");p.className="muted";p.textContent="No images yet";container.append(p);return;}
- for(const image of result.images){const link=document.createElement("a"),img=document.createElement("img");
- link.href="/outputs/"+encodeURIComponent(image);link.target="_blank";link.rel="noopener noreferrer";
- img.src=link.href;img.loading="lazy";img.alt="Generated image";link.append(img);container.append(link);}
+  const data=await api("/api/gallery");
+  const box=$("#gallery"); box.replaceChildren();
+  if(!data.images.length){
+    const p=document.createElement("p"); p.className="muted"; p.textContent="No images yet."; box.append(p); return;
+  }
+  for(const name of data.images){
+    const a=document.createElement("a"),img=document.createElement("img");
+    a.href="/outputs/"+encodeURIComponent(name); a.target="_blank"; a.rel="noopener";
+    img.src=a.href; img.loading="lazy"; img.alt="Generated image";
+    a.append(img); box.append(a);
+  }
 }
-async function status(){
- try{
-  const s=await api("/api/status");
-  document.querySelector("#status").textContent=s.running?"Generating…":s.error?"Error: "+s.error:s.output?"Finished: "+s.output:"Ready";
-  document.querySelector("#generate").disabled=s.running;
-  document.querySelector("#log").textContent=s.log.join("\n")||"No generation started.";
-  if(s.output!==lastOutput){lastOutput=s.output;if(s.output){
-   const a=document.createElement("a"),img=document.createElement("img");a.href="/outputs/"+encodeURIComponent(s.output);
-   a.target="_blank";a.rel="noopener noreferrer";img.id="preview";img.src=a.href;a.append(img);
-   document.querySelector("#result").replaceChildren(a);await gallery();
-  }}
- }catch(error){document.querySelector("#status").textContent=error.message;}
+async function poll(){
+  try{
+    const s=await api("/api/status");
+    $("#generate").disabled=s.running || $("#generate").disabled;
+    $("#runStatus").textContent=s.running?"Generating…":s.error?"Error: "+s.error:s.output?"Finished: "+s.output:"Ready.";
+    $("#log").textContent=(s.log&&s.log.length?s.log.join("\n"):"No generation started.");
+    if(s.output && s.output!==lastOutput){
+      lastOutput=s.output;
+      const a=document.createElement("a"),img=document.createElement("img");
+      a.href="/outputs/"+encodeURIComponent(s.output); a.target="_blank"; a.rel="noopener";
+      img.src=a.href; img.id="preview"; img.alt="Generated image";
+      a.append(img); $("#result").replaceChildren(a); await gallery();
+    }
+    if(!s.running) await refreshSetup();
+  }catch(e){$("#runStatus").textContent=e.message}
 }
-document.querySelector("#generate").onclick=async()=>{
- const body={};
- for(const id of ["prompt","width","height","seed","lora_strength"])body[id]=document.getElementById(id).value;
- for(const id of ["flash_attention","use_reference","use_lora"])body[id]=document.getElementById(id).checked;
- try{await api("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});await status();}
- catch(error){alert(error.message);}
+$("#generate").onclick=async()=>{
+  const body={
+    prompt:$("#prompt").value,
+    width:$("#width").value,
+    height:$("#height").value,
+    seed:$("#seed").value,
+    flash_attention:true
+  };
+  try{
+    await api("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    await poll();
+  }catch(e){alert(e.message)}
 };
-config().catch(console.error);gallery().catch(console.error);status();setInterval(status,1500);
-</script></body></html>
+refreshSetup().catch(e=>$("#setupNotice").textContent=e.message);
+gallery().catch(()=>{});
+poll();
+setInterval(poll,1500);
+</script>
+</body>
+</html>
