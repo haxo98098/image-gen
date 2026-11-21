@@ -12,7 +12,7 @@ input,textarea,button{font:inherit;border-radius:9px}
 input,textarea{color:#eef2ff;background:#0d111b;border:1px solid #333d53;padding:11px;width:100%}
 textarea{min-height:115px;resize:vertical}
 button{border:1px solid #465472;background:#29334a;color:white;padding:11px 16px;cursor:pointer}
-button:hover{background:#3b4967}button:disabled{opacity:.55;cursor:default}
+button:hover{background:#3b4967}details{margin-top:13px}summary{cursor:pointer;color:#b8c7ed;padding:9px 0}.missing{margin:8px 0;padding:10px;border:1px solid #4a4050;border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:10px}.missing button{font-size:13px}button:disabled{opacity:.55;cursor:default}
 .primary{background:#6f55dd;border-color:#917ff6;width:100%;font-weight:700;padding:15px}
 .field{display:flex;gap:8px}.field input{min-width:0}.field button{flex-shrink:0}
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -28,18 +28,25 @@ pre{white-space:pre-wrap;max-height:240px;overflow:auto;background:#0b101a;paddi
 <body>
 <header><h1>◈ MiniMax H3 Studio</h1><small>Local image generation · GGUF · Native Windows file selection · No ComfyUI</small></header>
 <main><section>
-<div class="panel"><h2>Model setup</h2><div id="files"></div>
-<p class="hint">Select sd-cli.exe, your MiniMax H3 diffusion GGUF, a compatible text encoder, and the VAE. Paths are saved only on your computer.</p></div>
+<div class="panel"><h2>Model setup</h2>
+<button id="selectModel" class="primary">Select Model (.gguf)</button>
+<p id="modelName" class="hint">No model selected</p>
+<p id="setupMessage" class="hint">Choose a model. Studio will search for the other components automatically.</p>
+<div id="missingFiles"></div>
+<details><summary>Advanced file settings</summary><div id="files"></div></details>
+</div>
 <div class="panel"><h2>Create / Edit</h2>
 <label for="prompt">Prompt</label><textarea id="prompt" placeholder="Describe the image you want..."></textarea>
 <div class="pair"><div><label for="width">Width</label><input id="width" type="number" value="1024" step="32" min="256" max="2048"></div>
 <div><label for="height">Height</label><input id="height" type="number" value="1024" step="32" min="256" max="2048"></div></div>
 <label for="seed">Seed (-1 for random)</label><input type="number" id="seed" value="-1">
+<details><summary>Advanced generation options</summary>
 <div class="checks">
 <label><input type="checkbox" id="flash_attention" checked>Flash attention</label>
 <label><input type="checkbox" id="use_reference">Use reference image</label>
 <label><input type="checkbox" id="use_lora">Try LoRA (experimental)</label></div>
 <label for="lora_strength">LoRA strength</label><input id="lora_strength" type="number" min="0" max="2" step="0.1" value="1">
+</details>
 <button class="primary" id="generate">Generate image</button>
 <p class="hint">Default MiniMax H3 preset: six steps, Euler, CFG 1.0. Your third-party LoRA may be incompatible.</p>
 </div></section>
@@ -56,12 +63,31 @@ for(const [key,name] of Object.entries(labels)){
  button.textContent="Browse…";button.dataset.pick=key;field.className="field";field.append(input,button);row.append(label,field);files.append(row);
 }
 let lastOutput=null;
+const requiredLabels={cli:"Generator engine (sd-cli.exe)",encoder:"Text encoder",vae:"Image VAE"};
+async function refreshSetup(data){
+ const cfg=data.config,missing=data.missing,container=document.querySelector("#missingFiles");
+ for(const key of Object.keys(labels))document.getElementById("f_"+key).value=cfg[key]||"";
+ document.querySelector("#modelName").textContent=cfg.model?("Selected: "+cfg.model.split(/[\\/]/).pop()):"No model selected";
+ document.querySelector("#setupMessage").textContent=missing.includes("model")?"Select your MiniMax H3 Image GGUF to begin.":missing.length?"Missing components below. Select each once; Studio remembers the paths.":"Required components found. Ready to generate.";
+ container.replaceChildren();
+ for(const key of missing.filter(key=>key!=="model")){
+  const row=document.createElement("div"),text=document.createElement("span"),button=document.createElement("button");
+  row.className="missing";text.textContent=requiredLabels[key]||key;button.textContent="Browse…";
+  button.onclick=()=>chooseFile(key);row.append(text,button);container.append(row);
+ }
+}
+async function chooseFile(key){
+ const data=await api("/api/pick/"+key,{method:"POST"});
+ await refreshSetup(data);
+}
+document.querySelector("#selectModel").onclick=async()=>{try{await chooseFile("model")}catch(error){alert(error.message)}};
+
 async function api(url,options){const response=await fetch(url,options),data=await response.json();if(!response.ok)throw Error(data.error||"Request failed");return data;}
-async function config(){const data=await api("/api/config");for(const key of Object.keys(labels))document.getElementById("f_"+key).value=data[key]||"";}
+async function config(){const data=await api("/api/config");await refreshSetup(data);}
 files.addEventListener("click",async event=>{
  const button=event.target.closest("button[data-pick]");if(!button)return;
  button.disabled=true;
- try{await api("/api/pick/"+button.dataset.pick,{method:"POST"});await config();}
+ try{await chooseFile(button.dataset.pick);}
  catch(error){alert(error.message);}
  finally{button.disabled=false;}
 });
