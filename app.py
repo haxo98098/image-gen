@@ -19,7 +19,7 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["MAX_CONTENT_LENGTH"] = 1_000_000
 LOCK = threading.Lock()
 STATE = {"running": False, "log": [], "error": None, "output": None, "returncode": None}
-FIELDS = ("cli", "model", "encoder", "vae", "reference", "lora")
+FIELDS = ("cli", "engine_dir", "model", "encoder", "vae")
 
 
 def config_read():
@@ -47,8 +47,6 @@ def local_path(value, field, required=False):
         "model": (".gguf", ".safetensors"),
         "encoder": (".gguf", ".safetensors"),
         "vae": (".gguf", ".safetensors"),
-        "lora": (".gguf", ".safetensors"),
-        "reference": (".png", ".jpg", ".jpeg", ".webp"),
     }
     if path.suffix.lower() not in allowed[field]:
         raise ValueError(f"Unexpected {field} file type")
@@ -60,53 +58,124 @@ def pick_file(field):
     root.withdraw()
     root.attributes("-topmost", True)
     try:
+        if field == "engine_dir":
+            return filedialog.askdirectory(
+                title="Select extracted stable-diffusion.cpp folder",
+                mustexist=True,
+                parent=root,
+            )
         types = ([("Executables", "*.exe")] if field == "cli"
-                 else [("Images", "*.png *.jpg *.jpeg *.webp")] if field == "reference"
                  else [("Model files", "*.gguf *.safetensors")])
-        return filedialog.askopenfilename(title="Select " + field, filetypes=types + [("All files", "*.*")], parent=root)
+        return filedialog.askopenfilename(
+            title="Select " + field,
+            filetypes=types + [("All files", "*.*")],
+            parent=root,
+        )
     finally:
         root.destroy()
+
+
+def find_sd_cli(folder):
+    if not folder:
+        return None
+    root = Path(folder).expanduser()
+    if not root.is_dir():
+        return None
+    preferred = (
+        root / "sd-cli.exe",
+        root / "sd-cli",
+        root / "bin" / "Release" / "sd-cli.exe",
+        root / "build" / "bin" / "Release" / "sd-cli.exe",
+        root / "bin" / "sd-cli.exe",
+    )
+    for candidate in preferred:
+        if candidate.is_file():
+            return candidate.resolve()
+    try:
+        for name in ("sd-cli.exe", "sd-cli"):
+            match = next(root.rglob(name), None)
+            if match and match.is_file():
+                return match.resolve()
+    except OSError:
+        pass
+    return None
 
 
 REQUIRED = ("cli", "model", "encoder", "vae")
 
 
 def discover_companions(cfg):
-    """Find recognizable companion files near the selected model, not across the entire disk."""
+    """Resolve the engine and companion model files with minimal user setup."""
     cfg = dict(cfg)
     model = Path(cfg["model"]).expanduser() if cfg.get("model") else None
-    dirs = [ROOT, ROOT / "bin", ROOT / "models"]
-    if model and model.is_file():
-        base = model.parent
-        dirs = [base, base / "models", base / "text_encoders",
-                base / "vae", base / "bin", base.parent, base.parent / "models"] + dirs
-    for key in ("cli", "encoder", "vae"):
-        value = cfg.get(key, "")
-        if value and not Path(value).is_file():
-            cfg[key] = ""
-    if not cfg.get("cli"):
+
+    # Engine: use the selected stable-diffusion.cpp folder, PATH, then nearby app folders.
+    cli = find_sd_cli(cfg.get("engine_dir"))
+    if cli:
+        cfg["cli"] = str(cli)
+    elif cfg.get("cli") and Path(cfg["cli"]).is_file():
+        pass
+    else:
+        cfg["cli"] = ""
         cmd = shutil.which("sd-cli") or shutil.which("sd-cli.exe")
         if cmd:
             cfg["cli"] = str(Path(cmd).resolve())
+        else:
+            for folder in (ROOT, ROOT / "bin", ROOT / "stable-diffusion.cpp"):
+                found = find_sd_cli(folder)
+                if found:
+                    cfg["cli"] = str(found)
+                    break
+
+    dirs = [ROOT, ROOT / "models"]
+    if model and model.is_file():
+        base = model.parent
+        dirs = [
+            base,
+            base / "text_encoders",
+            base / "vae",
+            base / "models",
+            base.parent,
+            base.parent / "text_encoders",
+            base.parent / "vae",
+            base.parent / "models",
+        ] + dirs
+
+    for key in ("encoder", "vae"):
+        value = cfg.get(key, "")
+        if value and not Path(value).is_file():
+            cfg[key] = ""
+
+    # Search only nearby known folders; never scan the whole machine.
     for folder in dict.fromkeys(dirs):
         if not folder.is_dir():
             continue
         try:
-            candidates = sorted((p for p in folder.iterdir() if p.is_file()), key=lambda p: p.name.casefold())
+            candidates = sorted(
+                (p for p in folder.iterdir() if p.is_file()),
+                key=lambda p: p.name.casefold(),
+            )
         except OSError:
             continue
         for path in candidates:
             lower = path.name.lower()
-            if not cfg.get("cli") and lower in ("sd-cli.exe", "sd-cli"):
-                cfg["cli"] = str(path.resolve())
             if path.suffix.lower() not in (".gguf", ".safetensors"):
                 continue
             if model and path.resolve() == model.resolve():
                 continue
-            if not cfg.get("encoder") and any(word in lower for word in ("qwen3vl", "qwen3-vl", "qwen3_vl", "text_encoder", "text-encoder")):
+            if not cfg.get("encoder") and any(
+                word in lower
+                for word in ("qwen3vl", "qwen3-vl", "qwen3_vl", "text_encoder", "text-encoder")
+            ):
                 cfg["encoder"] = str(path.resolve())
-            if not cfg.get("vae") and ("vae" in lower or "autoencoder" in lower):
+            if not cfg.get("vae") and (
+                "qwen_image_2.1_vae" in lower
+                or "qwen-image-2.1-vae" in lower
+                or "qwen_image_vae" in lower
+                or "vae" in lower
+            ):
                 cfg["vae"] = str(path.resolve())
+
     return cfg
 
 
@@ -135,9 +204,18 @@ def pick(field):
     try:
         selected = pick_file(field)
         if selected:
-            local_path(selected, field, required=True)
             cfg = config_read()
-            cfg[field] = selected
+            if field == "engine_dir":
+                cfg[field] = selected
+                cli = find_sd_cli(selected)
+                if not cli:
+                    return jsonify(
+                        error="No sd-cli.exe was found inside that folder. Select the extracted stable-diffusion.cpp build folder."
+                    ), 400
+                cfg["cli"] = str(cli)
+            else:
+                local_path(selected, field, required=True)
+                cfg[field] = selected
             config_write(cfg)
         return jsonify(path=selected, **setup_payload())
     except Exception as exc:
@@ -213,15 +291,6 @@ def build_command(cfg, data, output):
     ]
     if data.get("flash_attention", True):
         cmd.append("--diffusion-fa")
-    if data.get("use_reference"):
-        cmd += ["-r", str(local_path(cfg.get("reference"), "reference", True))]
-    if data.get("use_lora"):
-        lora = local_path(cfg.get("lora"), "lora", True)
-        strength = float(data.get("lora_strength", 1.0))
-        if not 0 <= strength <= 2:
-            raise ValueError("LoRA strength must be between 0 and 2")
-        cmd[cmd.index("-p") + 1] += f" <lora:{lora.stem}:{strength:g}>"
-        cmd += ["--lora-model-dir", str(lora.parent)]
     return cmd
 
 
