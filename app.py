@@ -1,4 +1,4 @@
-"""Local-only MiniMax H3 frontend for stable-diffusion.cpp."""
+"""Local-only Qwen-Image 2.1 frontend for stable-diffusion.cpp."""
 import json
 import os
 import secrets
@@ -103,7 +103,7 @@ def discover_companions(cfg):
                 continue
             if model and path.resolve() == model.resolve():
                 continue
-            if not cfg.get("encoder") and any(word in lower for word in ("qwen3vl", "qwen3-vl", "qwen3_vl", "p-h3", "text_encoder", "text-encoder")):
+            if not cfg.get("encoder") and any(word in lower for word in ("qwen3vl", "qwen3-vl", "qwen3_vl", "text_encoder", "text-encoder")):
                 cfg["encoder"] = str(path.resolve())
             if not cfg.get("vae") and ("vae" in lower or "autoencoder" in lower):
                 cfg["vae"] = str(path.resolve())
@@ -207,9 +207,8 @@ def build_command(cfg, data, output):
     cmd = [
         str(cli), "--diffusion-model", str(model), "--llm", str(encoder),
         "--vae", str(vae), "-p", prompt, "-W", str(width), "-H", str(height),
-        "--seed", str(seed), "--steps", "6", "--cfg-scale", "1.0",
-        "--sampling-method", "euler", "--sigmas", "minimax-h3-image",
-        "--rng", "cpu", "--offload-to-cpu", "--vae-tiling",
+        "--seed", str(seed), "--steps", "20", "--cfg-scale", "6.0",
+        "--sampling-method", "euler", "--rng", "cpu", "--offload-to-cpu", "--vae-tiling",
         "-o", str(output),
     ]
     if data.get("flash_attention", True):
@@ -245,5 +244,5 @@ def generate():
 
 if __name__ == "__main__":
     from waitress import serve
-    print("MiniMax H3 Studio: http://127.0.0.1:7865")
+    print("Qwen Image Studio: http://127.0.0.1:7865")
     serve(app, host="127.0.0.1", port=7865, threads=4)
