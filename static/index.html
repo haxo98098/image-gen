@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MiniMax H3 Studio</title>
+<title>Qwen Image Studio</title>
 <style>
 :root{color-scheme:dark;font:15px system-ui,sans-serif;background:#0b0d12;color:#edf1f9}
 *{box-sizing:border-box}body{margin:0}header{padding:25px 30px;border-bottom:1px solid #303544;background:#141824}
@@ -26,12 +26,12 @@ pre{white-space:pre-wrap;max-height:240px;overflow:auto;background:#0b101a;paddi
 @media(max-width:900px){main{display:block}header{padding:18px}}
 </style></head>
 <body>
-<header><h1>◈ MiniMax H3 Studio</h1><small>Local image generation · GGUF · Native Windows file selection · No ComfyUI</small></header>
+<header><h1>◈ Qwen Image Studio</h1><small>Qwen-Image 2.1 local generation · GGUF · No ComfyUI</small></header>
 <main><section>
 <div class="panel"><h2>Model setup</h2>
-<button id="selectModel" class="primary">Select Model (.gguf)</button>
+<button id="selectModel" class="primary">Select Qwen-Image 2.1 Model</button>
 <p id="modelName" class="hint">No model selected</p>
-<p id="setupMessage" class="hint">Choose a model. Studio will search for the other components automatically.</p>
+<p id="setupMessage" class="hint">Choose the Qwen-Image 2.1 model. Studio will automatically look for its encoder, VAE, and sd-cli.</p>
 <div id="missingFiles"></div>
 <details><summary>Advanced file settings</summary><div id="files"></div></details>
 </div>
@@ -48,7 +48,7 @@ pre{white-space:pre-wrap;max-height:240px;overflow:auto;background:#0b101a;paddi
 <label for="lora_strength">LoRA strength</label><input id="lora_strength" type="number" min="0" max="2" step="0.1" value="1">
 </details>
 <button class="primary" id="generate">Generate image</button>
-<p class="hint">Default MiniMax H3 preset: six steps, Euler, CFG 1.0. Your third-party LoRA may be incompatible.</p>
+<p class="hint">Qwen-Image 2.1 defaults: 20 steps, Euler, CFG 6.0. Third-party LoRAs may be incompatible.</p>
 </div></section>
 <section><div class="panel"><h2>Generation</h2><p id="status">Ready. Select the required model files.</p><div id="result"></div>
 <h2>Generator log</h2><pre id="log">No generation started.</pre></div>
@@ -63,12 +63,12 @@ for(const [key,name] of Object.entries(labels)){
  button.textContent="Browse…";button.dataset.pick=key;field.className="field";field.append(input,button);row.append(label,field);files.append(row);
 }
 let lastOutput=null;
-const requiredLabels={cli:"Generator engine (sd-cli.exe)",encoder:"Text encoder",vae:"Image VAE"};
+const requiredLabels={cli:"Generator engine (sd-cli.exe)",encoder:"Qwen3-VL 8B text encoder",vae:"Qwen-Image 2.1 VAE"};
 async function refreshSetup(data){
  const cfg=data.config,missing=data.missing,container=document.querySelector("#missingFiles");
  for(const key of Object.keys(labels))document.getElementById("f_"+key).value=cfg[key]||"";
  document.querySelector("#modelName").textContent=cfg.model?("Selected: "+cfg.model.split(/[\\/]/).pop()):"No model selected";
- document.querySelector("#setupMessage").textContent=missing.includes("model")?"Select your MiniMax H3 Image GGUF to begin.":missing.length?"Missing components below. Select each once; Studio remembers the paths.":"Required components found. Ready to generate.";
+ document.querySelector("#setupMessage").textContent=missing.includes("model")?"Select your Qwen-Image 2.1 GGUF to begin.":missing.length?"I could not find every required companion file. Select only the missing ones below.":"Qwen-Image 2.1 components found. Ready to generate.";
  container.replaceChildren();
  for(const key of missing.filter(key=>key!=="model")){
   const row=document.createElement("div"),text=document.createElement("span"),button=document.createElement("button");
