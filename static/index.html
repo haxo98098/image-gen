@@ -85,7 +85,7 @@ button{cursor:pointer}
 <header class="topbar">
   <div class="brand"><div class="logo">Q</div><div><div class="brandTitle">Qwen Image Studio</div><div id="headerStatus" class="brandSub">Checking local setup…</div></div></div>
   <div class="topActions">
-    <button id="cancelBtn" class="topBtn danger">Cancel</button>
+    <span id="queueLabel" class="topBtn" style="display:none;cursor:default">0 queued</span>\n    <button id="cancelBtn" class="topBtn danger">Cancel all</button>
     <button id="logToggle" class="topBtn">Logs</button>
     <button id="toolsToggle" class="topBtn">Tools</button>
     <button id="rescan" class="topBtn"><span id="readyDot" class="readyDot"></span><span id="readyLabel">Setup</span></button>
@@ -256,7 +256,7 @@ async function refreshSetup(){
   $("#modelName").textContent=c.model?filename(c.model):"No image model detected";$("#modelMeta").textContent=c.model?"Qwen-Image 2.1 diffusion model":"Choose the main GGUF image model.";
   stateLine($("#stEngine"),"Engine",!missing.has("cli"),c.cli?filename(c.cli):"");stateLine($("#stEncoder"),"Encoder",!missing.has("encoder"),c.encoder?filename(c.encoder):"");stateLine($("#stVae"),"VAE",!missing.has("vae"),c.vae?filename(c.vae):"");
   $("#selectEngine").style.display=missing.has("cli")?"block":"none";$("#readyDot").classList.toggle("ok",setupReady);$("#readyLabel").textContent=setupReady?"Ready":"Setup";
-  $("#headerStatus").textContent=setupReady?"Local model ready":missing.has("model")?"Image model missing":"Some local components are missing";$("#generate").disabled=!setupReady||running;
+  $("#headerStatus").textContent=setupReady?"Local model ready":missing.has("model")?"Image model missing":"Some local components are missing";$("#generate").disabled=!setupReady;
   $("#loraName").textContent=c.lora?filename(c.lora):"None selected";$("#upscalerName").textContent=c.upscaler?filename(c.upscaler):"None selected";
 }
 async function choose(field){await api("/api/pick/"+field,{method:"POST"});await refreshSetup()}
@@ -312,11 +312,26 @@ async function refreshOllama(){const sel=$("#ollamaModel"),st=$("#ollamaStatus")
 async function analyzeRefs(){if(!references.length){toast("Attach a reference first");return}const model=$("#ollamaModel").value;if(!model){toast("Choose an Ollama model");return}try{const d=await api("/api/ollama/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model,references:references.map(r=>r.name),instruction:$("#prompt").value.trim()})});$("#prompt").value=d.prompt;toast("Ollama updated the prompt")}catch(e){toast(e.message)}}
 
 async function generate(){
-  const prompt=$("#prompt").value.trim();if(!prompt)return;currentPrompt=prompt;
+  const prompt=$("#prompt").value.trim();if(!prompt)return;
   const body={prompt,negative_prompt:$("#negativePrompt").value,width:$("#width").value,height:$("#height").value,seed:getSeed(),steps:$("#steps").value,cfg_scale:$("#cfgScale").value,sampler:$("#sampler").value,scheduler:$("#scheduler").value,flash_attention:true,references:references.map(r=>r.name),use_lora:$("#useLora").checked,lora_strength:$("#loraStrength").value,use_upscaler:$("#useUpscaler").checked,upscale_repeats:$("#upscaleRepeats").value};
-  try{await api("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});advanceSeed();$("#prompt").value="";setGenerating(true);scrollBottom()}catch(e){currentPrompt="";toast(e.message)}
+  try{
+    const d=await api("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    advanceSeed();$("#prompt").value="";toast(d.queue_count>1?"Added to generation queue":"Generation queued");scrollBottom();
+  }catch(e){toast(e.message)}
 }
-async function poll(){try{const s=await api("/api/status");running=!!s.running;$("#log").textContent=s.log?.length?s.log.join("\n"):"No generation started.";setGenerating(running,s.progress,s.stage);$("#generate").disabled=running||!setupReady;$("#cancelBtn").style.display=running?"inline-block":"none";if(s.error&&s.error!==lastError){lastError=s.error;toast(s.error)}else if(!s.error){lastError=null}if(s.output&&s.output!==lastOutput){lastOutput=s.output;setGenerating(false);imageTurn(s.output,currentPrompt);currentPrompt="";await refreshSidebarGallery();scrollBottom()}if(!running)await refreshSetup()}catch(e){toast(e.message)}}
+async function poll(){try{
+  const s=await api("/api/status");running=!!s.running;
+  const queued=Number(s.queue_count||0);
+  $("#log").textContent=s.log?.length?s.log.join("\n"):"No generation started.";
+  setGenerating(running,s.progress,s.stage);
+  $("#generate").disabled=!setupReady;
+  $("#cancelBtn").style.display=(running||queued)?"inline-block":"none";
+  $("#queueLabel").style.display=queued?"inline-block":"none";$("#queueLabel").textContent=queued+" queued";
+  if(running)$("#headerStatus").textContent=(s.stage||"Creating image")+(queued?" · "+queued+" queued":"");
+  if(s.error&&s.error!==lastError){lastError=s.error;toast(s.error)}else if(!s.error){lastError=null}
+  if(s.output&&s.output!==lastOutput){lastOutput=s.output;setGenerating(false);imageTurn(s.output,s.current_prompt||"");await refreshSidebarGallery();scrollBottom()}
+  if(!running&&!queued)await refreshSetup();
+}catch(e){toast(e.message)}}
 
 $("#selectModel").onclick=()=>choose("model").catch(e=>toast(e.message));$("#selectEngine").onclick=()=>choose("engine_dir").catch(e=>toast(e.message));$("#selectLora").onclick=()=>choose("lora").catch(e=>toast(e.message));$("#selectUpscaler").onclick=()=>choose("upscaler").catch(e=>toast(e.message));
 $("#attach").onclick=()=>$("#referenceInput").click();$("#referenceInput").onchange=e=>{uploadReferences([...e.target.files]);e.target.value=""};
