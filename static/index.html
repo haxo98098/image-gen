@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MiniMax H3 Studio</title>
+<style>
+:root{color-scheme:dark;font:15px system-ui,sans-serif;background:#0b0d12;color:#edf1f9}
+*{box-sizing:border-box}body{margin:0}header{padding:25px 30px;border-bottom:1px solid #303544;background:#141824}
+h1{margin:0;font-size:23px}small,.muted{color:#a4adbd}
+main{max-width:1380px;padding:22px;margin:auto;display:grid;grid-template-columns:minmax(300px,440px) 1fr;gap:20px}
+.panel{background:#171c28;border:1px solid #2e3446;border-radius:15px;padding:21px;margin-bottom:18px}
+h2{font-size:16px;margin:0 0 16px}label{display:block;margin:12px 0 5px;color:#b6c3d9}
+input,textarea,button{font:inherit;border-radius:9px}
+input,textarea{color:#eef2ff;background:#0d111b;border:1px solid #333d53;padding:11px;width:100%}
+textarea{min-height:115px;resize:vertical}
+button{border:1px solid #465472;background:#29334a;color:white;padding:11px 16px;cursor:pointer}
+button:hover{background:#3b4967}button:disabled{opacity:.55;cursor:default}
+.primary{background:#6f55dd;border-color:#917ff6;width:100%;font-weight:700;padding:15px}
+.field{display:flex;gap:8px}.field input{min-width:0}.field button{flex-shrink:0}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.checks{display:flex;gap:15px;flex-wrap:wrap;margin:18px 0}
+.checks label{margin:0;display:flex;align-items:center;gap:6px}.checks input{width:auto}
+#preview{max-width:100%;max-height:620px;border-radius:10px}
+#gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(135px,1fr));gap:10px}
+#gallery img{width:100%;border-radius:9px}
+pre{white-space:pre-wrap;max-height:240px;overflow:auto;background:#0b101a;padding:14px;border-radius:10px;font-size:12px;color:#aab8cd}
+#status{color:#bcd0ff;min-height:20px}.hint{line-height:1.5;color:#a5afc1}
+@media(max-width:900px){main{display:block}header{padding:18px}}
+</style></head>
+<body>
+<header><h1>◈ MiniMax H3 Studio</h1><small>Local image generation · GGUF · Native Windows file selection · No ComfyUI</small></header>
+<main><section>
+<div class="panel"><h2>Model setup</h2><div id="files"></div>
+<p class="hint">Select sd-cli.exe, your MiniMax H3 diffusion GGUF, a compatible text encoder, and the VAE. Paths are saved only on your computer.</p></div>
+<div class="panel"><h2>Create / Edit</h2>
+<label for="prompt">Prompt</label><textarea id="prompt" placeholder="Describe the image you want..."></textarea>
+<div class="pair"><div><label for="width">Width</label><input id="width" type="number" value="1024" step="32" min="256" max="2048"></div>
+<div><label for="height">Height</label><input id="height" type="number" value="1024" step="32" min="256" max="2048"></div></div>
+<label for="seed">Seed (-1 for random)</label><input type="number" id="seed" value="-1">
+<div class="checks">
+<label><input type="checkbox" id="flash_attention" checked>Flash attention</label>
+<label><input type="checkbox" id="use_reference">Use reference image</label>
+<label><input type="checkbox" id="use_lora">Try LoRA (experimental)</label></div>
+<label for="lora_strength">LoRA strength</label><input id="lora_strength" type="number" min="0" max="2" step="0.1" value="1">
+<button class="primary" id="generate">Generate image</button>
+<p class="hint">Default MiniMax H3 preset: six steps, Euler, CFG 1.0. Your third-party LoRA may be incompatible.</p>
+</div></section>
+<section><div class="panel"><h2>Generation</h2><p id="status">Ready. Select the required model files.</p><div id="result"></div>
+<h2>Generator log</h2><pre id="log">No generation started.</pre></div>
+<div class="panel"><h2>Gallery</h2><div id="gallery"></div></div></section></main>
+<script>
+const labels={cli:"sd-cli executable",model:"MiniMax diffusion model",encoder:"Text encoder",vae:"Image VAE",reference:"Reference image (optional)",lora:"LoRA (experimental)"};
+const files=document.querySelector("#files");
+for(const [key,name] of Object.entries(labels)){
+ const row=document.createElement("div"),label=document.createElement("label"),field=document.createElement("div");
+ const input=document.createElement("input"),button=document.createElement("button");
+ label.htmlFor="f_"+key;label.textContent=name;input.id="f_"+key;input.readOnly=true;input.placeholder="Not selected";
+ button.textContent="Browse…";button.dataset.pick=key;field.className="field";field.append(input,button);row.append(label,field);files.append(row);
+}
+let lastOutput=null;
+async function api(url,options){const response=await fetch(url,options),data=await response.json();if(!response.ok)throw Error(data.error||"Request failed");return data;}
+async function config(){const data=await api("/api/config");for(const key of Object.keys(labels))document.getElementById("f_"+key).value=data[key]||"";}
+files.addEventListener("click",async event=>{
+ const button=event.target.closest("button[data-pick]");if(!button)return;
+ button.disabled=true;
+ try{await api("/api/pick/"+button.dataset.pick,{method:"POST"});await config();}
+ catch(error){alert(error.message);}
+ finally{button.disabled=false;}
+});
+async function gallery(){
+ const result=await api("/api/gallery"),container=document.querySelector("#gallery");container.replaceChildren();
+ if(!result.images.length){const p=document.createElement("p");p.className="muted";p.textContent="No images yet";container.append(p);return;}
+ for(const image of result.images){const link=document.createElement("a"),img=document.createElement("img");
+ link.href="/outputs/"+encodeURIComponent(image);link.target="_blank";link.rel="noopener noreferrer";
+ img.src=link.href;img.loading="lazy";img.alt="Generated image";link.append(img);container.append(link);}
+}
+async function status(){
+ try{
+  const s=await api("/api/status");
+  document.querySelector("#status").textContent=s.running?"Generating…":s.error?"Error: "+s.error:s.output?"Finished: "+s.output:"Ready";
+  document.querySelector("#generate").disabled=s.running;
+  document.querySelector("#log").textContent=s.log.join("\n")||"No generation started.";
+  if(s.output!==lastOutput){lastOutput=s.output;if(s.output){
+   const a=document.createElement("a"),img=document.createElement("img");a.href="/outputs/"+encodeURIComponent(s.output);
+   a.target="_blank";a.rel="noopener noreferrer";img.id="preview";img.src=a.href;a.append(img);
+   document.querySelector("#result").replaceChildren(a);await gallery();
+  }}
+ }catch(error){document.querySelector("#status").textContent=error.message;}
+}
+document.querySelector("#generate").onclick=async()=>{
+ const body={};
+ for(const id of ["prompt","width","height","seed","lora_strength"])body[id]=document.getElementById(id).value;
+ for(const id of ["flash_attention","use_reference","use_lora"])body[id]=document.getElementById(id).checked;
+ try{await api("/api/generate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});await status();}
+ catch(error){alert(error.message);}
+};
+config().catch(console.error);gallery().catch(console.error);status();setInterval(status,1500);
+</script></body></html>
