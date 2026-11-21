@@ -7,11 +7,11 @@ A local, standalone browser harness for MiniMax H3 Image GGUF generation via `st
 1. Install Python 3.10+ and get a MiniMax H3-compatible CUDA build of `sd-cli.exe` from [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp).
 2. Download one MiniMax H3 Image GGUF diffusion model, a compatible text encoder and the MiniMax H3 Image VAE.
 3. Run `START_WINDOWS.bat`. The local interface opens at `http://127.0.0.1:7865`.
-4. Use **Browse** to select the local executable, diffusion model, text encoder and VAE. Enter a prompt, then generate.
+4. Click **Select Model**, choose your MiniMax H3 Image GGUF, and the studio checks nearby folders for `sd-cli.exe`, the text encoder, and VAE. If anything is missing, it displays a Browse control only for that missing component. Enter a prompt, then generate.
 
 ## Capabilities
 
-- Native Windows file selection on the server's own desktop
+- One-click model selection, automatic nearby-file detection, and native Windows file pickers only for missing components
 - Text-to-image and optional reference-image editing
 - Optional experimental LoRA selection; model compatibility is **not yet confirmed**
 - Local-only web interface, saved gallery, logs, and persistent file selections
