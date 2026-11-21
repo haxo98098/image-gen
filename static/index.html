@@ -34,7 +34,10 @@ button,input,textarea,select{font:inherit}button{color:inherit}
 .imageFrame img{display:block;width:100%;height:auto;max-height:70vh;object-fit:contain;background:#080a0d}
 .imageBar{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:8px 9px;border-top:1px solid #222831;background:#11151a}.imageName{font-size:11px;color:var(--soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
 .imageActions{display:flex;gap:3px;align-items:center}.miniBtn,.openBtn{border:0;background:transparent;color:#c8ced8;cursor:pointer;padding:5px 7px;border-radius:7px;text-decoration:none;font-size:11px}.miniBtn:hover,.openBtn:hover{background:#20252e}.deleteBtn:hover{background:#382025;color:#ffb1b1}
-.generating{display:flex;align-items:center;gap:10px;color:#b8c0cc;padding:18px 4px}.spinner{width:18px;height:18px;border:2px solid #303641;border-top-color:#a78bfa;border-radius:50%;animation:spin .8s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.generating{width:min(100%,500px);margin:16px auto 30px;padding:18px 18px 14px;border-radius:18px;background:#0a0b0d;border:1px solid #1e232b;box-shadow:0 18px 50px #0005}
+.genTitle{font-size:15px;color:#eef4ff;margin:0 0 14px 2px}.genViz{position:relative;width:100%;aspect-ratio:1.25/1;border-radius:14px;overflow:hidden;background:radial-gradient(circle at 50% 50%,rgba(0,115,255,.055),transparent 58%),#090a0c}
+.genCanvas{display:block;width:100%;height:100%}.genBadge{position:absolute;right:10px;bottom:9px;min-width:56px;text-align:center;padding:6px 10px;border-radius:999px;background:#202126d9;border:1px solid #292b31;color:#24a0ff;font:12px/1.1 ui-monospace,SFMono-Regular,Consolas,monospace;backdrop-filter:blur(8px)}
+.genHint{font-size:11px;color:#66707f;margin:9px 2px 0;text-align:center}
 .composerWrap{position:absolute;left:0;right:0;bottom:0;padding:24px;background:linear-gradient(180deg,transparent 0%,rgba(11,13,16,.92) 22%,var(--bg) 55%)}
 .composer{width:min(900px,calc(100% - 24px));margin:0 auto;border:1px solid #303642;background:#171b21;border-radius:22px;padding:10px;box-shadow:0 14px 40px rgba(0,0,0,.32)}
 .refStrip{display:none;gap:8px;overflow-x:auto;padding:3px 5px 8px}.refStrip.show{display:flex}.refThumb{width:72px;height:72px;border-radius:11px;border:1px solid #323944;overflow:hidden;position:relative;flex:0 0 auto;background:#0b0e12}.refThumb img{width:100%;height:100%;object-fit:cover}.refRemove{position:absolute;top:4px;right:4px;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:#111c;color:#fff;cursor:pointer}
@@ -100,7 +103,7 @@ button,input,textarea,select{font:inherit}button{color:inherit}
 
 <script>
 const $=s=>document.querySelector(s);
-let lastOutput=null,lastError=null,setupReady=false,currentPrompt="",historyLoaded=false,references=[],running=false;
+let lastOutput=null,lastError=null,setupReady=false,currentPrompt="",historyLoaded=false,references=[],running=false,generationAnimation=null;
 const defaultSize=localStorage.getItem("imageCardSize")||"m";
 
 async function api(url,options){const response=await fetch(url,options);const data=await response.json();if(!response.ok)throw new Error(data.error||"Request failed");return data}
@@ -131,7 +134,43 @@ function imageTurn(name,prompt="",size=defaultSize){
   del.onclick=async()=>{if(!confirm("Delete this generated image?"))return;try{await api("/api/images/"+encodeURIComponent(name),{method:"DELETE"});turn.remove();ensureEmpty();toast("Image deleted")}catch(e){toast(e.message)}};
   actions.append(open,del);bar.append(label,actions);frame.append(img,bar);reply.append(frame);turn.append(reply);$("#feedInner").append(turn);return turn;
 }
-function setGenerating(on){let el=$("#generating");if(on&&!el){removeEmpty();el=document.createElement("div");el.id="generating";el.className="generating";el.innerHTML='<span class="spinner"></span><span>Generating image…</span>';$("#feedInner").append(el);scrollBottom()}else if(!on&&el){el.remove()}}
+function drawGenerationField(canvas){
+  const ctx=canvas.getContext("2d"),dpr=Math.max(1,Math.min(2,window.devicePixelRatio||1));
+  let lastW=0,lastH=0,startTime=performance.now();
+  function frame(now){
+    const rect=canvas.getBoundingClientRect(),w=Math.max(1,rect.width),h=Math.max(1,rect.height);
+    if(w!==lastW||h!==lastH){lastW=w;lastH=h;canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);ctx.setTransform(dpr,0,0,dpr,0,0)}
+    ctx.clearRect(0,0,w,h);
+    const cols=29,rows=23,padX=w*.075,padY=h*.075,dx=(w-padX*2)/(cols-1),dy=(h-padY*2)/(rows-1);
+    const cx=w*.5,cy=h*.52,t=(now-startTime)/1000,wave=(t*.20)%1;
+    for(let y=0;y<rows;y++)for(let x=0;x<cols;x++){
+      const px=padX+x*dx,py=padY+y*dy,nx=(px-cx)/(w*.48),ny=(py-cy)/(h*.48),dist=Math.sqrt(nx*nx+ny*ny);
+      const core=Math.exp(-dist*dist*3.15),ring=Math.exp(-Math.pow(dist-wave*1.15,2)*90),shimmer=(Math.sin(x*.72+y*.48+t*2.8)+1)*.5;
+      const alpha=Math.min(1,.07+core*.72+ring*.42+shimmer*core*.12),radius=.8+core*1.05+ring*.45;
+      ctx.beginPath();ctx.arc(px,py,radius,0,Math.PI*2);ctx.fillStyle="rgba(24,134,255,"+alpha.toFixed(3)+")";ctx.fill();
+      if(core>.6){ctx.beginPath();ctx.arc(px,py,radius*2.4,0,Math.PI*2);ctx.fillStyle="rgba(22,126,255,"+(core*.055).toFixed(3)+")";ctx.fill()}
+    }
+    generationAnimation=requestAnimationFrame(frame);
+  }
+  if(generationAnimation)cancelAnimationFrame(generationAnimation);
+  generationAnimation=requestAnimationFrame(frame);
+}
+function setGenerating(on,progress=null,stage="Creating image"){
+  let el=$("#generating");
+  if(on&&!el){
+    removeEmpty();el=document.createElement("div");el.id="generating";el.className="generating";
+    el.innerHTML='<div id="genTitle" class="genTitle">Creating image</div><div class="genViz"><canvas id="genCanvas" class="genCanvas"></canvas><div id="genBadge" class="genBadge">•••</div></div><div class="genHint">Rendering locally on your GPU</div>';
+    $("#feedInner").append(el);drawGenerationField($("#genCanvas"));scrollBottom();
+  }
+  if(on&&el){
+    const title=$("#genTitle"),badge=$("#genBadge");
+    if(title)title.textContent=stage||"Creating image";
+    if(badge)badge.textContent=Number.isFinite(progress)?Math.max(0,Math.min(100,progress))+"%":"•••";
+  }else if(!on&&el){
+    if(generationAnimation){cancelAnimationFrame(generationAnimation);generationAnimation=null}
+    el.remove();
+  }
+}
 
 async function refreshSetup(){
   const data=await api("/api/config"),c=data.config||{},missing=new Set(data.missing||[]);setupReady=missing.size===0;
@@ -188,7 +227,7 @@ async function analyzeRefs(){
 
 async function poll(){
   try{
-    const s=await api("/api/status");running=!!s.running;$("#log").textContent=(s.log&&s.log.length?s.log.join("\n"):"No generation started.");setGenerating(running);$("#generate").disabled=running||!setupReady;
+    const s=await api("/api/status");running=!!s.running;$("#log").textContent=(s.log&&s.log.length?s.log.join("\n"):"No generation started.");setGenerating(running,s.progress,s.stage);$("#generate").disabled=running||!setupReady;
     if(s.error&&s.error!==lastError){lastError=s.error;toast(s.error)}else if(!s.error){lastError=null}
     if(s.output&&s.output!==lastOutput){lastOutput=s.output;setGenerating(false);imageTurn(s.output,currentPrompt);currentPrompt="";scrollBottom()}
     if(!running)await refreshSetup();
